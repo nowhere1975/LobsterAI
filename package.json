@@ -25,6 +25,11 @@
         "id": "qqbot",
         "npm": "@sliverp/qqbot",
         "version": "1.5.3"
+      },
+      {
+        "id": "wecom-openclaw-plugin",
+        "npm": "@wecom/wecom-openclaw-plugin",
+        "version": "1.0.6"
       }
     ]
   },

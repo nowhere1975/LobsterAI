@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import type { CoworkConfig, CoworkExecutionMode } from '../coworkStore';
-import type { DingTalkConfig, FeishuConfig, QQConfig } from '../im/types';
+import type { DingTalkConfig, FeishuConfig, QQConfig, WecomConfig } from '../im/types';
 import { resolveRawApiConfig } from './claudeSettings';
 import type { OpenClawEngineManager } from './openclawEngineManager';
 
@@ -54,6 +54,7 @@ type OpenClawConfigSyncDeps = {
   getDingTalkConfig: () => DingTalkConfig | null;
   getFeishuConfig: () => FeishuConfig | null;
   getQQConfig: () => QQConfig | null;
+  getWecomConfig: () => WecomConfig | null;
 };
 
 export class OpenClawConfigSync {
@@ -62,6 +63,7 @@ export class OpenClawConfigSync {
   private readonly getDingTalkConfig: () => DingTalkConfig | null;
   private readonly getFeishuConfig: () => FeishuConfig | null;
   private readonly getQQConfig: () => QQConfig | null;
+  private readonly getWecomConfig: () => WecomConfig | null;
 
   constructor(deps: OpenClawConfigSyncDeps) {
     this.engineManager = deps.engineManager;
@@ -69,6 +71,7 @@ export class OpenClawConfigSync {
     this.getDingTalkConfig = deps.getDingTalkConfig;
     this.getFeishuConfig = deps.getFeishuConfig;
     this.getQQConfig = deps.getQQConfig;
+    this.getWecomConfig = deps.getWecomConfig;
   }
 
   sync(reason: string): OpenClawConfigSyncResult {
@@ -116,7 +119,10 @@ export class OpenClawConfigSync {
     const qqConfig = this.getQQConfig();
     const hasQQ = qqConfig?.enabled && qqConfig.appId;
 
-    const hasAnyChannel = hasDingTalk || hasFeishu || hasQQ;
+    const wecomConfig = this.getWecomConfig();
+    const hasWecom = wecomConfig?.enabled && wecomConfig.botId;
+
+    const hasAnyChannel = hasDingTalk || hasFeishu || hasQQ || hasWecom;
 
     const managedConfig: Record<string, unknown> = {
       gateway: {
@@ -197,6 +203,14 @@ export class OpenClawConfigSync {
               clientSecret: qqConfig.appSecret,
             },
           } : {}),
+          ...(hasWecom ? {
+            wecom: {
+              enabled: true,
+              botId: wecomConfig.botId,
+              secret: wecomConfig.secret,
+              dmPolicy: 'open',
+            },
+          } : {}),
         },
       } : hasFeishu ? {
         channels: {
@@ -213,6 +227,14 @@ export class OpenClawConfigSync {
               clientSecret: qqConfig.appSecret,
             },
           } : {}),
+          ...(hasWecom ? {
+            wecom: {
+              enabled: true,
+              botId: wecomConfig.botId,
+              secret: wecomConfig.secret,
+              dmPolicy: 'open',
+            },
+          } : {}),
         },
       } : hasQQ ? {
         channels: {
@@ -220,6 +242,22 @@ export class OpenClawConfigSync {
             enabled: true,
             appId: qqConfig.appId,
             clientSecret: qqConfig.appSecret,
+          },
+          ...(hasWecom ? {
+            wecom: {
+              enabled: true,
+              botId: wecomConfig.botId,
+              secret: wecomConfig.secret,
+              dmPolicy: 'open',
+            },
+          } : {}),
+        },
+      } : hasWecom ? {
+        channels: {
+          wecom: {
+            enabled: true,
+            botId: wecomConfig.botId,
+            secret: wecomConfig.secret,
           },
         },
       } : {}),

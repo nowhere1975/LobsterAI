@@ -692,6 +692,13 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
           return null;
         }
       },
+      getWecomConfig: () => {
+        try {
+          return getIMGatewayManager().getConfig().wecom;
+        } catch {
+          return null;
+        }
+      },
     });
   }
   return openClawConfigSync;
@@ -2239,6 +2246,10 @@ if (!gotTheLock) {
       // Re-sync OpenClaw config so qqbot plugin picks up new credentials
       if (config.qq) {
         void syncOpenClawConfig({ reason: 'im-qq-config-change', restartGatewayIfRunning: false });
+      }
+      // Re-sync OpenClaw config so wecom-openclaw-plugin picks up new credentials
+      if (config.wecom) {
+        void syncOpenClawConfig({ reason: 'im-wecom-config-change', restartGatewayIfRunning: false });
       }
       return { success: true };
     } catch (error) {
