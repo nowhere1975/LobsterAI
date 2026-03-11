@@ -175,12 +175,22 @@ export interface XiaomifengGatewayStatus {
 
 // ==================== QQ Types ====================
 
-export interface QQConfig {
+export interface QQOpenClawConfig {
   enabled: boolean;
   appId: string;
   appSecret: string;
-  debug?: boolean;
+  dmPolicy: 'open' | 'pairing' | 'allowlist';
+  allowFrom: string[];
+  groupPolicy: 'open' | 'allowlist' | 'disabled';
+  groupAllowFrom: string[];
+  historyLimit: number;
+  markdownSupport: boolean;
+  imageServerBaseUrl: string;
+  debug: boolean;
 }
+
+/** @deprecated Use QQOpenClawConfig instead */
+export type QQConfig = QQOpenClawConfig;
 
 export interface QQGatewayStatus {
   connected: boolean;
@@ -216,7 +226,7 @@ export interface IMGatewayConfig {
   dingtalk: DingTalkOpenClawConfig;
   feishu: FeishuOpenClawConfig;
   telegram: TelegramOpenClawConfig;
-  qq: QQConfig;
+  qq: QQOpenClawConfig;
   discord: DiscordOpenClawConfig;
   nim: NimConfig;
   xiaomifeng: XiaomifengConfig;
@@ -435,11 +445,18 @@ export const DEFAULT_TELEGRAM_OPENCLAW_CONFIG: TelegramOpenClawConfig = {
   debug: false,
 };
 
-export const DEFAULT_QQ_CONFIG: QQConfig = {
+export const DEFAULT_QQ_CONFIG: QQOpenClawConfig = {
   enabled: false,
   appId: '',
   appSecret: '',
-  debug: true,
+  dmPolicy: 'open',
+  allowFrom: [],
+  groupPolicy: 'open',
+  groupAllowFrom: [],
+  historyLimit: 50,
+  markdownSupport: true,
+  imageServerBaseUrl: '',
+  debug: false,
 };
 
 export const DEFAULT_WECOM_CONFIG: WecomConfig = {

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import type { CoworkConfig, CoworkExecutionMode } from '../coworkStore';
 import type { TelegramOpenClawConfig, DiscordOpenClawConfig } from '../im/types';
-import type { DingTalkOpenClawConfig, FeishuOpenClawConfig, QQConfig, WecomConfig } from '../im/types';
+import type { DingTalkOpenClawConfig, FeishuOpenClawConfig, QQOpenClawConfig, WecomConfig } from '../im/types';
 import { resolveRawApiConfig } from './claudeSettings';
 import type { OpenClawEngineManager } from './openclawEngineManager';
 
@@ -56,7 +56,7 @@ type OpenClawConfigSyncDeps = {
   getDiscordOpenClawConfig?: () => DiscordOpenClawConfig | null;
   getDingTalkConfig: () => DingTalkOpenClawConfig | null;
   getFeishuConfig: () => FeishuOpenClawConfig | null;
-  getQQConfig: () => QQConfig | null;
+  getQQConfig: () => QQOpenClawConfig | null;
   getWecomConfig: () => WecomConfig | null;
 };
 
@@ -67,7 +67,7 @@ export class OpenClawConfigSync {
   private readonly getDiscordOpenClawConfig?: () => DiscordOpenClawConfig | null;
   private readonly getDingTalkConfig: () => DingTalkOpenClawConfig | null;
   private readonly getFeishuConfig: () => FeishuOpenClawConfig | null;
-  private readonly getQQConfig: () => QQConfig | null;
+  private readonly getQQConfig: () => QQOpenClawConfig | null;
   private readonly getWecomConfig: () => WecomConfig | null;
 
   constructor(deps: OpenClawConfigSyncDeps) {
@@ -123,12 +123,11 @@ export class OpenClawConfigSync {
     const hasFeishu = false; // Legacy in-line feishu channel disabled; OpenClaw plugin used instead
 
     const qqConfig = this.getQQConfig();
-    const hasQQ = qqConfig?.enabled && qqConfig.appId;
 
     const wecomConfig = this.getWecomConfig();
     const hasWecom = wecomConfig?.enabled && wecomConfig.botId;
 
-    const hasAnyChannel = hasDingTalkOpenClaw || hasQQ || hasWecom;
+    const hasAnyChannel = hasDingTalkOpenClaw || hasWecom;
 
     const managedConfig: Record<string, unknown> = {
       gateway: {
@@ -189,28 +188,13 @@ export class OpenClawConfigSync {
             },
           }
         : {}),
-      ...(hasQQ ? {
-        channels: {
-          qqbot: {
-            enabled: true,
-            appId: qqConfig.appId,
-            clientSecret: qqConfig.appSecret,
-          },
-          ...(hasWecom ? {
-            wecom: {
-              enabled: true,
-              botId: wecomConfig.botId,
-              secret: wecomConfig.secret,
-              dmPolicy: 'open',
-            },
-          } : {}),
-        },
-      } : hasWecom ? {
+      ...(hasWecom ? {
         channels: {
           wecom: {
             enabled: true,
             botId: wecomConfig.botId,
             secret: wecomConfig.secret,
+            dmPolicy: 'open',
           },
         },
       } : {}),
@@ -357,6 +341,35 @@ export class OpenClawConfigSync {
       managedConfig.channels = { ...(managedConfig.channels as Record<string, unknown> || {}), 'dingtalk-connector': dingtalkChannel };
     } else if (dingTalkConfig) {
       managedConfig.channels = { ...(managedConfig.channels as Record<string, unknown> || {}), 'dingtalk-connector': { enabled: false } };
+    }
+
+    // Sync QQ OpenClaw channel config (via qqbot plugin)
+    if (qqConfig?.enabled && qqConfig.appId) {
+      const qqChannel: Record<string, unknown> = {
+        enabled: true,
+        appId: qqConfig.appId,
+        clientSecret: qqConfig.appSecret,
+        dmPolicy: qqConfig.dmPolicy || 'open',
+        allowFrom: (() => {
+          const ids = qqConfig.allowFrom?.length ? [...qqConfig.allowFrom] : [];
+          if (qqConfig.dmPolicy === 'open' && !ids.includes('*')) ids.push('*');
+          return ids;
+        })(),
+        groupPolicy: qqConfig.groupPolicy || 'open',
+        groupAllowFrom: (() => {
+          const ids = qqConfig.groupAllowFrom?.length ? [...qqConfig.groupAllowFrom] : [];
+          if (qqConfig.groupPolicy === 'open' && !ids.includes('*')) ids.push('*');
+          return ids;
+        })(),
+        historyLimit: qqConfig.historyLimit || 50,
+        markdownSupport: qqConfig.markdownSupport ?? true,
+      };
+      if (qqConfig.imageServerBaseUrl) {
+        qqChannel.imageServerBaseUrl = qqConfig.imageServerBaseUrl;
+      }
+      managedConfig.channels = { ...(managedConfig.channels as Record<string, unknown> || {}), qqbot: qqChannel };
+    } else if (qqConfig) {
+      managedConfig.channels = { ...(managedConfig.channels as Record<string, unknown> || {}), qqbot: { enabled: false } };
     }
 
     const nextContent = `${JSON.stringify(managedConfig, null, 2)}\n`;

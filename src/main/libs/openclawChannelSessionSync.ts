@@ -17,6 +17,7 @@ const CHANNEL_PLATFORM_MAP: Record<string, IMPlatform> = {
   discord: 'discord',
   feishu: 'feishu',
   'dingtalk-connector': 'dingtalk',
+  qqbot: 'qq',
 };
 
 /** Parse a channel sessionKey into platform + conversationId.
@@ -76,6 +77,7 @@ const CHANNEL_TITLE_PREFIX: Record<string, string> = {
   discord: '[Discord]',
   feishu: '[飞书]',
   'dingtalk-connector': '[钉钉]',
+  qqbot: '[QQ]',
 };
 
 export interface ChannelSessionSyncDeps {

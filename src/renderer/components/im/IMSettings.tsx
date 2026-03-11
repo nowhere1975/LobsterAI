@@ -11,7 +11,7 @@ import { RootState } from '../../store';
 import { imService } from '../../services/im';
 import { setDingTalkConfig, setFeishuConfig, setTelegramOpenClawConfig, setQQConfig, setDiscordConfig, setNimConfig, setXiaomifengConfig, setWecomConfig, clearError } from '../../store/slices/imSlice';
 import { i18nService } from '../../services/i18n';
-import type { IMPlatform, IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, TelegramOpenClawConfig, DiscordOpenClawConfig, FeishuOpenClawConfig, DingTalkOpenClawConfig } from '../../types/im';
+import type { IMPlatform, IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, TelegramOpenClawConfig, DiscordOpenClawConfig, FeishuOpenClawConfig, DingTalkOpenClawConfig, QQOpenClawConfig } from '../../types/im';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 
 // Platform metadata
@@ -161,9 +161,17 @@ const IMSettings: React.FC = () => {
     await imService.updateConfig({ telegram: configToSave });
   };
 
-  // Handle QQ config change
-  const handleQQChange = (field: 'appId' | 'appSecret', value: string) => {
-    dispatch(setQQConfig({ [field]: value }));
+  // Handle QQ OpenClaw config change
+  const qqOpenClawConfig = config.qq;
+  const handleQQOpenClawChange = (update: Partial<QQOpenClawConfig>) => {
+    dispatch(setQQConfig(update));
+  };
+  const handleSaveQQOpenClawConfig = async (override?: Partial<QQOpenClawConfig>) => {
+    if (!configLoaded) return;
+    const configToSave = override
+      ? { ...qqOpenClawConfig, ...override }
+      : qqOpenClawConfig;
+    await imService.updateConfig({ qq: configToSave });
   };
 
   // Handle Telegram OpenClaw config change (legacy wrapper)
@@ -226,6 +234,12 @@ const IMSettings: React.FC = () => {
     // For Feishu, save feishu config directly
     if (activePlatform === 'feishu') {
       await imService.updateConfig({ feishu: fsOpenClawConfig });
+      return;
+    }
+
+    // For QQ, save qq config directly (OpenClaw mode)
+    if (activePlatform === 'qq') {
+      await imService.updateConfig({ qq: qqOpenClawConfig });
       return;
     }
 
@@ -338,6 +352,25 @@ const IMSettings: React.FC = () => {
           if (!success) {
             dispatch(setFeishuConfig({ enabled: false }));
             await imService.updateConfig({ feishu: { ...fsOpenClawConfig, enabled: false } });
+          }
+        } else {
+          await imService.stopGateway(platform);
+        }
+        return;
+      }
+
+      // QQ has a separate config path (OpenClaw mode)
+      if (platform === 'qq') {
+        const newEnabled = !qqOpenClawConfig.enabled;
+        dispatch(setQQConfig({ enabled: newEnabled }));
+        await imService.updateConfig({ qq: { ...qqOpenClawConfig, enabled: newEnabled } });
+
+        if (newEnabled) {
+          dispatch(clearError());
+          const success = await imService.startGateway(platform);
+          if (!success) {
+            dispatch(setQQConfig({ enabled: false }));
+            await imService.updateConfig({ qq: { ...qqOpenClawConfig, enabled: false } });
           }
         } else {
           await imService.stopGateway(platform);
@@ -459,6 +492,15 @@ const IMSettings: React.FC = () => {
       await imService.updateConfig({ telegram: tgOpenClawConfig });
       await runConnectivityTest(platform, {
         telegram: tgOpenClawConfig,
+      } as Partial<IMGatewayConfig>);
+      return;
+    }
+
+    // For QQ, persist qq config and test (OpenClaw mode)
+    if (platform === 'qq') {
+      await imService.updateConfig({ qq: qqOpenClawConfig });
+      await runConnectivityTest(platform, {
+        qq: qqOpenClawConfig,
       } as Partial<IMGatewayConfig>);
       return;
     }
@@ -1288,17 +1330,17 @@ const IMSettings: React.FC = () => {
               <div className="relative">
                 <input
                   type="text"
-                  value={config.qq.appId}
-                  onChange={(e) => handleQQChange('appId', e.target.value)}
-                  onBlur={handleSaveConfig}
+                  value={qqOpenClawConfig.appId}
+                  onChange={(e) => handleQQOpenClawChange({ appId: e.target.value })}
+                  onBlur={() => handleSaveQQOpenClawConfig()}
                   className="block w-full rounded-lg dark:bg-claude-darkSurface/80 bg-claude-surface/80 dark:border-claude-darkBorder/60 border-claude-border/60 border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 pr-8 text-sm transition-colors"
                   placeholder="102xxxxx"
                 />
-                {config.qq.appId && (
+                {qqOpenClawConfig.appId && (
                   <div className="absolute right-2 inset-y-0 flex items-center">
                     <button
                       type="button"
-                      onClick={() => { handleQQChange('appId', ''); void imService.updateConfig({ qq: { ...config.qq, appId: '' } }); }}
+                      onClick={() => { handleQQOpenClawChange({ appId: '' }); void imService.updateConfig({ qq: { ...qqOpenClawConfig, appId: '' } }); }}
                       className="p-0.5 rounded text-claude-textSecondary dark:text-claude-darkTextSecondary hover:text-claude-accent transition-colors"
                       title={i18nService.t('clear') || 'Clear'}
                     >
@@ -1317,17 +1359,17 @@ const IMSettings: React.FC = () => {
               <div className="relative">
                 <input
                   type={showSecrets['qq.appSecret'] ? 'text' : 'password'}
-                  value={config.qq.appSecret}
-                  onChange={(e) => handleQQChange('appSecret', e.target.value)}
-                  onBlur={handleSaveConfig}
+                  value={qqOpenClawConfig.appSecret}
+                  onChange={(e) => handleQQOpenClawChange({ appSecret: e.target.value })}
+                  onBlur={() => handleSaveQQOpenClawConfig()}
                   className="block w-full rounded-lg dark:bg-claude-darkSurface/80 bg-claude-surface/80 dark:border-claude-darkBorder/60 border-claude-border/60 border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 pr-16 text-sm transition-colors"
                   placeholder="••••••••••••"
                 />
                 <div className="absolute right-2 inset-y-0 flex items-center gap-1">
-                  {config.qq.appSecret && (
+                  {qqOpenClawConfig.appSecret && (
                     <button
                       type="button"
-                      onClick={() => { handleQQChange('appSecret', ''); void imService.updateConfig({ qq: { ...config.qq, appSecret: '' } }); }}
+                      onClick={() => { handleQQOpenClawChange({ appSecret: '' }); void imService.updateConfig({ qq: { ...qqOpenClawConfig, appSecret: '' } }); }}
                       className="p-0.5 rounded text-claude-textSecondary dark:text-claude-darkTextSecondary hover:text-claude-accent transition-colors"
                       title={i18nService.t('clear') || 'Clear'}
                     >
@@ -1344,7 +1386,183 @@ const IMSettings: React.FC = () => {
                   </button>
                 </div>
               </div>
+              <p className="text-xs text-claude-textSecondary dark:text-claude-darkTextSecondary">
+                从 QQ 开放平台获取 AppID 和 AppSecret
+              </p>
             </div>
+
+            {/* Advanced Settings (collapsible) */}
+            <details className="group">
+              <summary className="cursor-pointer text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-accent transition-colors">
+                高级设置
+              </summary>
+              <div className="mt-2 space-y-3 pl-2 border-l-2 border-claude-border/30 dark:border-claude-darkBorder/30">
+                {/* DM Policy */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                    DM Policy
+                  </label>
+                  <select
+                    value={qqOpenClawConfig.dmPolicy}
+                    onChange={(e) => {
+                      const update = { dmPolicy: e.target.value as QQOpenClawConfig['dmPolicy'] };
+                      handleQQOpenClawChange(update);
+                      void handleSaveQQOpenClawConfig(update);
+                    }}
+                    className="block w-full rounded-lg dark:bg-claude-darkSurface/80 bg-claude-surface/80 dark:border-claude-darkBorder/60 border-claude-border/60 border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 text-sm transition-colors"
+                  >
+                    <option value="open">Open（开放）</option>
+                    <option value="pairing">Pairing（配对码验证）</option>
+                    <option value="allowlist">Allowlist（白名单）</option>
+                  </select>
+                </div>
+
+                {/* Pairing Requests (shown when dmPolicy is 'pairing') */}
+                {qqOpenClawConfig.dmPolicy === 'pairing' && renderPairingSection('qq')}
+
+                {/* Allow From */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                    Allow From (User IDs)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={allowedUserIdInput}
+                      onChange={(e) => setAllowedUserIdInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const id = allowedUserIdInput.trim();
+                          if (id && !qqOpenClawConfig.allowFrom.includes(id)) {
+                            const newIds = [...qqOpenClawConfig.allowFrom, id];
+                            handleQQOpenClawChange({ allowFrom: newIds });
+                            setAllowedUserIdInput('');
+                            void imService.updateConfig({ qq: { ...qqOpenClawConfig, allowFrom: newIds } });
+                          }
+                        }
+                      }}
+                      className="block flex-1 rounded-lg dark:bg-claude-darkSurface/80 bg-claude-surface/80 dark:border-claude-darkBorder/60 border-claude-border/60 border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 text-sm transition-colors"
+                      placeholder="输入 QQ OpenID"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const id = allowedUserIdInput.trim();
+                        if (id && !qqOpenClawConfig.allowFrom.includes(id)) {
+                          const newIds = [...qqOpenClawConfig.allowFrom, id];
+                          handleQQOpenClawChange({ allowFrom: newIds });
+                          setAllowedUserIdInput('');
+                          void imService.updateConfig({ qq: { ...qqOpenClawConfig, allowFrom: newIds } });
+                        }
+                      }}
+                      className="px-3 py-2 rounded-lg text-xs font-medium bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20 transition-colors"
+                    >
+                      {i18nService.t('add') || '添加'}
+                    </button>
+                  </div>
+                  {qqOpenClawConfig.allowFrom.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {qqOpenClawConfig.allowFrom.map((id) => (
+                        <span
+                          key={id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs dark:bg-claude-darkSurface/80 bg-claude-surface/80 dark:border-claude-darkBorder/60 border-claude-border/60 border dark:text-claude-darkText text-claude-text"
+                        >
+                          {id}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newIds = qqOpenClawConfig.allowFrom.filter((uid) => uid !== id);
+                              handleQQOpenClawChange({ allowFrom: newIds });
+                              void imService.updateConfig({ qq: { ...qqOpenClawConfig, allowFrom: newIds } });
+                            }}
+                            className="text-claude-textSecondary dark:text-claude-darkTextSecondary hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                          >
+                            <XMarkIcon className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Group Policy */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                    Group Policy
+                  </label>
+                  <select
+                    value={qqOpenClawConfig.groupPolicy}
+                    onChange={(e) => {
+                      const update = { groupPolicy: e.target.value as QQOpenClawConfig['groupPolicy'] };
+                      handleQQOpenClawChange(update);
+                      void handleSaveQQOpenClawConfig(update);
+                    }}
+                    className="block w-full rounded-lg dark:bg-claude-darkSurface/80 bg-claude-surface/80 dark:border-claude-darkBorder/60 border-claude-border/60 border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 text-sm transition-colors"
+                  >
+                    <option value="open">Open</option>
+                    <option value="allowlist">Allowlist</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                </div>
+
+                {/* History Limit */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                    History Limit
+                  </label>
+                  <input
+                    type="number"
+                    value={qqOpenClawConfig.historyLimit}
+                    onChange={(e) => handleQQOpenClawChange({ historyLimit: parseInt(e.target.value) || 50 })}
+                    onBlur={() => handleSaveQQOpenClawConfig()}
+                    className="block w-full rounded-lg dark:bg-claude-darkSurface/80 bg-claude-surface/80 dark:border-claude-darkBorder/60 border-claude-border/60 border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 text-sm transition-colors"
+                    min="1"
+                    max="200"
+                  />
+                </div>
+
+                {/* Markdown Support */}
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                    Markdown Support
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const update = { markdownSupport: !qqOpenClawConfig.markdownSupport };
+                      handleQQOpenClawChange(update);
+                      void handleSaveQQOpenClawConfig(update);
+                    }}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                      qqOpenClawConfig.markdownSupport ? 'bg-claude-accent' : 'dark:bg-claude-darkSurface bg-claude-surface'
+                    }`}
+                  >
+                    <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      qqOpenClawConfig.markdownSupport ? 'translate-x-4' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+
+                {/* Image Server Base URL */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                    Image Server Base URL
+                  </label>
+                  <input
+                    type="text"
+                    value={qqOpenClawConfig.imageServerBaseUrl}
+                    onChange={(e) => handleQQOpenClawChange({ imageServerBaseUrl: e.target.value })}
+                    onBlur={() => handleSaveQQOpenClawConfig()}
+                    className="block w-full rounded-lg dark:bg-claude-darkSurface/80 bg-claude-surface/80 dark:border-claude-darkBorder/60 border-claude-border/60 border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 text-sm transition-colors"
+                    placeholder="http://your-ip:18765"
+                  />
+                  <p className="text-xs text-claude-textSecondary dark:text-claude-darkTextSecondary">
+                    图床服务器公网地址，用于发送图片
+                  </p>
+                </div>
+              </div>
+            </details>
 
             <div className="pt-1">
               {renderConnectivityTestButton('qq')}

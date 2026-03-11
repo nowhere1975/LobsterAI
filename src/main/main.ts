@@ -2342,7 +2342,13 @@ if (!gotTheLock) {
       }
       // Re-sync OpenClaw config so qqbot plugin picks up new credentials
       if (config.qq) {
-        void syncOpenClawConfig({ reason: 'im-qq-config-change', restartGatewayIfRunning: false });
+        const engineManager = getOpenClawEngineManager();
+        if (engineManager.getStatus().phase === 'running') {
+          await syncOpenClawConfig({
+            reason: 'im-qq-openclaw-config-change',
+            restartGatewayIfRunning: true,
+          });
+        }
       }
       // Re-sync OpenClaw config so wecom-openclaw-plugin picks up new credentials
       if (config.wecom) {

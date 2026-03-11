@@ -10,7 +10,6 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { NimGateway } from './nimGateway';
 import { XiaomifengGateway } from './xiaomifengGateway';
-import { QQGateway } from './qqGateway';
 import { WecomGateway } from './wecomGateway';
 import { IMChatHandler } from './imChatHandler';
 import { IMCoworkHandler } from './imCoworkHandler';
@@ -56,7 +55,6 @@ export interface IMGatewayManagerOptions {
 export class IMGatewayManager extends EventEmitter {
   private nimGateway: NimGateway;
   private xiaomifengGateway: XiaomifengGateway;
-  private qqGateway: QQGateway;
   private wecomGateway: WecomGateway;
   private imStore: IMStore;
   private chatHandler: IMChatHandler | null = null;
@@ -81,7 +79,6 @@ export class IMGatewayManager extends EventEmitter {
     this.imStore = new IMStore(db, saveDb);
     this.nimGateway = new NimGateway();
     this.xiaomifengGateway = new XiaomifengGateway();
-    this.qqGateway = new QQGateway();
     this.wecomGateway = new WecomGateway();
 
     // Store Cowork dependencies if provided
@@ -140,20 +137,7 @@ export class IMGatewayManager extends EventEmitter {
       this.emit('message', message);
     });
 
-    // QQ events
-    this.qqGateway.on('connected', () => {
-      this.emit('statusChange', this.getStatus());
-    });
-    this.qqGateway.on('disconnected', () => {
-      this.emit('statusChange', this.getStatus());
-    });
-    this.qqGateway.on('error', (error) => {
-      this.emit('error', { platform: 'qq', error });
-      this.emit('statusChange', this.getStatus());
-    });
-    this.qqGateway.on('message', (message: IMMessage) => {
-      this.emit('message', message);
-    });
+    // QQ runs via OpenClaw; no direct gateway events to forward
 
     // WeCom events
     this.wecomGateway.on('status', () => {
@@ -193,10 +177,7 @@ export class IMGatewayManager extends EventEmitter {
       this.xiaomifengGateway.reconnectIfNeeded();
     }
 
-    if (this.qqGateway && !this.qqGateway.isConnected()) {
-      console.log('[IMGatewayManager] Reconnecting QQ...');
-      this.qqGateway.reconnectIfNeeded();
-    }
+    // QQ runs via OpenClaw; no direct reconnection needed
 
     if (this.wecomGateway && !this.wecomGateway.isConnected()) {
       console.log('[IMGatewayManager] Reconnecting WeCom...');
@@ -270,7 +251,6 @@ export class IMGatewayManager extends EventEmitter {
 
     this.nimGateway.setMessageCallback(messageHandler);
     this.xiaomifengGateway.setMessageCallback(messageHandler);
-    this.qqGateway.setMessageCallback(messageHandler);
     this.wecomGateway.setMessageCallback(messageHandler);
   }
 
@@ -282,8 +262,6 @@ export class IMGatewayManager extends EventEmitter {
       let target: any = null;
       if (platform === 'nim') {
         target = this.nimGateway.getNotificationTarget();
-      } else if (platform === 'qq') {
-        target = this.qqGateway.getNotificationTarget();
       } else if (platform === 'wecom') {
         target = this.wecomGateway.getNotificationTarget();
       }
@@ -305,8 +283,6 @@ export class IMGatewayManager extends EventEmitter {
 
       if (platform === 'nim') {
         this.nimGateway.setNotificationTarget(target);
-      } else if (platform === 'qq') {
-        this.qqGateway.setNotificationTarget(target);
       } else if (platform === 'wecom') {
         this.wecomGateway.setNotificationTarget(target);
       }
@@ -430,21 +406,7 @@ export class IMGatewayManager extends EventEmitter {
       }
     }
 
-    // Hot-update QQ config: restart if credential fields changed
-    if (config.qq && this.qqGateway) {
-      const oldQQ = previousConfig.qq;
-      const newQQ = { ...oldQQ, ...config.qq };
-      const credentialsChanged =
-        newQQ.appId !== oldQQ.appId ||
-        newQQ.appSecret !== oldQQ.appSecret;
-
-      if (credentialsChanged && this.qqGateway.isConnected()) {
-        console.log('[IMGatewayManager] QQ credentials changed, restarting gateway...');
-        this.restartGateway('qq').catch((err) => {
-          console.error('[IMGatewayManager] Failed to restart QQ after config change:', err.message);
-        });
-      }
-    }
+    // QQ runs via OpenClaw; config changes are synced via OpenClawConfigSync
 
     // Hot-update WeCom config: restart if credential fields changed
     if (config.wecom && this.wecomGateway) {
@@ -525,7 +487,13 @@ export class IMGatewayManager extends EventEmitter {
       dingtalk: dingtalkStatus,
       feishu: feishuStatus,
       telegram: telegramStatus,
-      qq: this.qqGateway.getStatus(),
+      qq: {
+        connected: Boolean(config.qq?.enabled && config.qq.appId && config.qq.appSecret),
+        startedAt: null as number | null,
+        lastError: null as string | null,
+        lastInboundAt: null as number | null,
+        lastOutboundAt: null as number | null,
+      },
       discord: discordStatus,
       nim: this.nimGateway.getStatus(),
       xiaomifeng: this.xiaomifengGateway.getStatus(),
@@ -704,8 +672,8 @@ export class IMGatewayManager extends EventEmitter {
       addCheck({
         code: 'qq_guild_mention_hint',
         level: 'info',
-        message: 'QQ 频道中需要 @机器人 才能触发消息响应，也支持私信对话。',
-        suggestion: '请在频道中使用 @机器人 + 内容触发对话，或通过私信直接发送消息。',
+        message: 'QQ 通过 OpenClaw 运行时运行，Bot 将在 OpenClaw Gateway 启动后自动连接。',
+        suggestion: '频道中需 @机器人 触发对话，也支持私信和群聊。',
       });
     } else if (platform === 'wecom') {
       addCheck({
@@ -765,7 +733,11 @@ export class IMGatewayManager extends EventEmitter {
     } else if (platform === 'xiaomifeng') {
       await this.xiaomifengGateway.start(config.xiaomifeng);
     } else if (platform === 'qq') {
-      await this.qqGateway.start(config.qq);
+      // QQ runs via OpenClaw gateway (qqbot plugin)
+      console.log('[IMGatewayManager] QQ in OpenClaw mode, syncing config instead of starting direct gateway');
+      await this.syncOpenClawConfig?.();
+      await this.ensureOpenClawGatewayConnected?.();
+      return;
     } else if (platform === 'wecom') {
       await this.wecomGateway.start(config.wecom);
     }
@@ -803,7 +775,10 @@ export class IMGatewayManager extends EventEmitter {
     } else if (platform === 'xiaomifeng') {
       await this.xiaomifengGateway.stop();
     } else if (platform === 'qq') {
-      await this.qqGateway.stop();
+      // QQ runs via OpenClaw gateway
+      console.log('[IMGatewayManager] QQ in OpenClaw mode, syncing disabled config');
+      await this.syncOpenClawConfig?.();
+      return;
     } else if (platform === 'wecom') {
       await this.wecomGateway.stop();
     }
@@ -887,7 +862,6 @@ export class IMGatewayManager extends EventEmitter {
     await Promise.all([
       this.nimGateway.stop(),
       this.xiaomifengGateway.stop(),
-      this.qqGateway.stop(),
       this.wecomGateway.stop(),
     ]);
   }
@@ -896,7 +870,7 @@ export class IMGatewayManager extends EventEmitter {
    * Check if any gateway is connected
    */
   isAnyConnected(): boolean {
-    return this.nimGateway.isConnected() || this.xiaomifengGateway.isConnected() || this.qqGateway.isConnected() || this.wecomGateway.isConnected();
+    return this.nimGateway.isConnected() || this.xiaomifengGateway.isConnected() || this.wecomGateway.isConnected();
   }
 
   /**
@@ -925,7 +899,9 @@ export class IMGatewayManager extends EventEmitter {
       return this.xiaomifengGateway.isConnected();
     }
     if (platform === 'qq') {
-      return this.qqGateway.isConnected();
+      // QQ runs via OpenClaw; consider it connected when enabled and configured
+      const config = this.getConfig();
+      return Boolean(config.qq?.enabled && config.qq.appId && config.qq.appSecret);
     }
     if (platform === 'wecom') {
       return this.wecomGateway.isConnected();
@@ -948,7 +924,8 @@ export class IMGatewayManager extends EventEmitter {
       if (platform === 'nim') {
         await this.nimGateway.sendNotification(text);
       } else if (platform === 'qq') {
-        await this.qqGateway.sendNotification(text);
+        // QQ runs via OpenClaw; notifications are handled by the qqbot plugin
+        console.log('[IMGatewayManager] QQ notification via OpenClaw not yet supported');
       } else if (platform === 'wecom') {
         await this.wecomGateway.sendNotification(text);
       } else if (platform === 'xiaomifeng') {
@@ -971,7 +948,8 @@ export class IMGatewayManager extends EventEmitter {
       if (platform === 'nim') {
         await this.nimGateway.sendNotificationWithMedia(text);
       } else if (platform === 'qq') {
-        await this.qqGateway.sendNotificationWithMedia(text);
+        // QQ runs via OpenClaw; notifications are handled by the qqbot plugin
+        console.log('[IMGatewayManager] QQ notification with media via OpenClaw not yet supported');
       } else if (platform === 'wecom') {
         await this.wecomGateway.sendNotificationWithMedia(text);
       } else if (platform === 'xiaomifeng') {

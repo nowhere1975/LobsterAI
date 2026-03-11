@@ -10,7 +10,7 @@ import type {
   DingTalkOpenClawConfig,
   FeishuOpenClawConfig,
   TelegramOpenClawConfig,
-  QQConfig,
+  QQOpenClawConfig,
   DiscordOpenClawConfig,
   NimConfig,
   XiaomifengConfig,
@@ -55,7 +55,7 @@ const imSlice = createSlice({
         ...action.payload,
       };
     },
-    setQQConfig: (state, action: PayloadAction<Partial<QQConfig>>) => {
+    setQQConfig: (state, action: PayloadAction<Partial<QQOpenClawConfig>>) => {
       state.config.qq = { ...state.config.qq, ...action.payload };
     },
     setDiscordConfig: (state, action: PayloadAction<Partial<DiscordOpenClawConfig>>) => {
