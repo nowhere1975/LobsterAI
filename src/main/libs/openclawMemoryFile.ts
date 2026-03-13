@@ -4,11 +4,9 @@
  * Reads and writes the curated long-term memory file that OpenClaw's
  * memory_search / memory_get tools index automatically.
  *
- * File format:
- *   # User Memories
- *
- *   - Entry one
- *   - Entry two
+ * The file may contain mixed content (headings, prose, bullet lists).
+ * Only top-level bullet lines (`- text`) are treated as memory entries.
+ * Non-bullet content (## headings, paragraphs, etc.) is preserved on writes.
  */
 
 import crypto from 'crypto';
@@ -45,9 +43,7 @@ const DEFAULT_OPENCLAW_WORKSPACE = path.join(os.homedir(), '.openclaw', 'workspa
  */
 export function resolveMemoryFilePath(workingDirectory: string | undefined): string {
   const dir = (workingDirectory || '').trim();
-  const resolved = path.join(dir || DEFAULT_OPENCLAW_WORKSPACE, 'MEMORY.md');
-  console.log(`${TAG} resolveMemoryFilePath: workingDirectory=${dir || '(empty)'} → ${resolved}`);
-  return resolved;
+  return path.join(dir || DEFAULT_OPENCLAW_WORKSPACE, 'MEMORY.md');
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +63,17 @@ function fingerprint(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Bullet-line detection (single dash only: "- text")
+// ---------------------------------------------------------------------------
+
+/** Match a top-level Markdown bullet: exactly one `-` followed by whitespace. */
+const BULLET_RE = /^-\s+(.+)$/;
+
+function isBulletLine(line: string): boolean {
+  return BULLET_RE.test(line.trim());
+}
+
+// ---------------------------------------------------------------------------
 // Parsing & serialisation
 // ---------------------------------------------------------------------------
 
@@ -75,7 +82,7 @@ const HEADER = '# User Memories';
 /**
  * Parse a MEMORY.md file into entries.
  *
- * Recognises lines starting with `- ` (one or more dashes + space).
+ * Recognises lines starting with `- ` (single dash + space).
  * Code blocks are stripped before parsing to avoid false positives.
  */
 export function parseMemoryMd(content: string): OpenClawMemoryEntry[] {
@@ -85,7 +92,7 @@ export function parseMemoryMd(content: string): OpenClawMemoryEntry[] {
   const seen = new Set<string>();
 
   for (const line of lines) {
-    const match = line.trim().match(/^-+\s+(.+)$/);
+    const match = line.trim().match(BULLET_RE);
     if (!match?.[1]) continue;
     const text = match[1].replace(/\s+/g, ' ').trim();
     if (!text || text.length < 2) continue;
@@ -100,7 +107,7 @@ export function parseMemoryMd(content: string): OpenClawMemoryEntry[] {
 }
 
 /**
- * Serialise entries back to MEMORY.md format.
+ * Serialise entries back to MEMORY.md format (standalone, no existing content).
  */
 export function serializeMemoryMd(entries: OpenClawMemoryEntry[]): string {
   if (entries.length === 0) return `${HEADER}\n`;
@@ -108,16 +115,76 @@ export function serializeMemoryMd(entries: OpenClawMemoryEntry[]): string {
   return `${HEADER}\n\n${lines.join('\n')}\n`;
 }
 
+/**
+ * Build updated MEMORY.md content by surgically replacing bullet lines
+ * while preserving all non-bullet content (headings, prose, sections).
+ *
+ * Strategy:
+ *   1. Walk original lines; collect non-bullet lines verbatim.
+ *   2. Replace the first contiguous bullet block with the new entries.
+ *   3. Remove all other bullet lines (to avoid duplicates).
+ *   4. If no bullet block existed, append entries at the end.
+ */
+function rebuildMemoryMd(
+  originalContent: string,
+  entries: OpenClawMemoryEntry[],
+): string {
+  if (!originalContent.trim()) {
+    return serializeMemoryMd(entries);
+  }
+
+  const lines = originalContent.split(/\r?\n/);
+  const result: string[] = [];
+  let bulletBlockInserted = false;
+  // Track whether we are inside a fenced code block
+  let inCodeBlock = false;
+
+  for (const line of lines) {
+    // Toggle code-block state
+    if (line.trimStart().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      result.push(line);
+      continue;
+    }
+    if (inCodeBlock) {
+      result.push(line);
+      continue;
+    }
+
+    if (isBulletLine(line)) {
+      // First bullet block → insert all new entries here
+      if (!bulletBlockInserted) {
+        bulletBlockInserted = true;
+        for (const e of entries) {
+          result.push(`- ${e.text}`);
+        }
+      }
+      // Skip original bullet line (already replaced by new entries)
+      continue;
+    }
+
+    result.push(line);
+  }
+
+  // No bullet block in original → append entries at the end
+  if (!bulletBlockInserted && entries.length > 0) {
+    result.push('');
+    for (const e of entries) {
+      result.push(`- ${e.text}`);
+    }
+  }
+
+  // Ensure trailing newline
+  const text = result.join('\n');
+  return text.endsWith('\n') ? text : text + '\n';
+}
+
 // ---------------------------------------------------------------------------
 // File I/O helpers
 // ---------------------------------------------------------------------------
 
 function ensureDir(filePath: string): void {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    console.log(`${TAG} Creating directory: ${dir}`);
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
 function readFileOrEmpty(filePath: string): string {
@@ -137,13 +204,13 @@ function readFileOrEmpty(filePath: string): string {
 
 export function readMemoryEntries(filePath: string): OpenClawMemoryEntry[] {
   const entries = parseMemoryMd(readFileOrEmpty(filePath));
-  console.log(`${TAG} readMemoryEntries: ${filePath} → ${entries.length} entries`);
   return entries;
 }
 
 export function writeMemoryEntries(filePath: string, entries: OpenClawMemoryEntry[]): void {
   ensureDir(filePath);
-  fs.writeFileSync(filePath, serializeMemoryMd(entries), 'utf8');
+  const original = readFileOrEmpty(filePath);
+  fs.writeFileSync(filePath, rebuildMemoryMd(original, entries), 'utf8');
   console.log(`${TAG} writeMemoryEntries: wrote ${entries.length} entries to ${filePath}`);
 }
 
@@ -154,7 +221,6 @@ export function addMemoryEntry(filePath: string, text: string): OpenClawMemoryEn
   const entries = readMemoryEntries(filePath);
   const entry: OpenClawMemoryEntry = { id: fingerprint(trimmed), text: trimmed };
 
-  // Deduplicate
   if (entries.some((e) => e.id === entry.id)) {
     console.log(`${TAG} addMemoryEntry: duplicate skipped (id=${entry.id.slice(0, 8)}…)`);
     return entry;
@@ -181,6 +247,7 @@ export function updateMemoryEntry(
     return null;
   }
 
+  // Note: ID changes because it's content-based (fingerprint of text)
   const updated: OpenClawMemoryEntry = { id: fingerprint(trimmed), text: trimmed };
   const oldText = entries[idx].text;
   entries[idx] = updated;

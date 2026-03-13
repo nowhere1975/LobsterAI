@@ -542,6 +542,7 @@ let openClawConfigSync: OpenClawConfigSync | null = null;
 let openClawBootstrapPromise: Promise<OpenClawEngineStatus> | null = null;
 let openClawStatusForwarderBound = false;
 let coworkRuntimeForwarderBound = false;
+let memoryMigrationDone = false;
 
 const initStore = async (): Promise<SqliteStore> => {
   if (!storeInitPromise) {
@@ -1924,15 +1925,22 @@ if (!gotTheLock) {
       const config = getCoworkStore().getConfig();
       const filePath = resolveMemoryFilePath(config.workingDirectory);
 
-      // Lazy migration: SQLite → MEMORY.md (one-time)
-      migrateSqliteToMemoryMd(filePath, {
-        isMigrationDone: () => getStore().get<string>('openclawMemory.migration.v1.completed') === '1',
-        markMigrationDone: () => getStore().set('openclawMemory.migration.v1.completed', '1'),
-        getActiveMemoryTexts: () => {
-          return getCoworkStore().listUserMemories({ status: 'all', includeDeleted: false, limit: 200 })
-            .map((m) => m.text);
-        },
-      });
+      // Lazy migration: SQLite → MEMORY.md (one-time, cached in memory)
+      if (!memoryMigrationDone) {
+        migrateSqliteToMemoryMd(filePath, {
+          isMigrationDone: () => getStore().get<string>('openclawMemory.migration.v1.completed') === '1',
+          markMigrationDone: () => {
+            getStore().set('openclawMemory.migration.v1.completed', '1');
+            memoryMigrationDone = true;
+          },
+          getActiveMemoryTexts: () => {
+            return getCoworkStore().listUserMemories({ status: 'all', includeDeleted: false, limit: 200 })
+              .map((m) => m.text);
+          },
+        });
+        // Even if migration found nothing, skip future checks this session
+        memoryMigrationDone = true;
+      }
 
       const query = input?.query?.trim() || '';
       const entries = query
@@ -2085,7 +2093,10 @@ if (!gotTheLock) {
       if (normalizedConfig.workingDirectory !== undefined && normalizedConfig.workingDirectory !== previousWorkingDir) {
         getSkillManager().handleWorkingDirectoryChange();
         // Sync MEMORY.md to new workspace directory
-        syncMemoryFileOnWorkspaceChange(previousWorkingDir, normalizedConfig.workingDirectory);
+        const syncResult = syncMemoryFileOnWorkspaceChange(previousWorkingDir, normalizedConfig.workingDirectory);
+        if (syncResult.error) {
+          console.warn('[OpenClaw Memory] Workspace sync failed:', syncResult.error);
+        }
       }
 
       const nextConfig = getCoworkStore().getConfig();
