@@ -18,6 +18,9 @@ const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+// Signal to electron-builder-hooks to skip openclaw runtime check
+process.env.LOBSTERAI_PORTABLE_BUILD = '1';
+
 const ROOT = path.resolve(__dirname, '..');
 const RELEASE_DIR = path.join(ROOT, 'release');
 const UNPACKED_DIR = path.join(RELEASE_DIR, 'win-unpacked');

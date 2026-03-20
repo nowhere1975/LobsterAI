@@ -462,7 +462,9 @@ function installSkillDependencies() {
 }
 
 async function beforePack(context) {
-  ensureBundledOpenClawRuntime(context);
+  if (process.env.LOBSTERAI_PORTABLE_BUILD !== '1') {
+    ensureBundledOpenClawRuntime(context);
+  }
   // Install skill dependencies first (for all platforms)
   installSkillDependencies();
 
