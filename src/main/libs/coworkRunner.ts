@@ -1738,7 +1738,10 @@ export class CoworkRunner extends EventEmitter {
       pathToClaudeCodeExecutable: claudeCodePath,
       permissionMode: 'default',
       includePartialMessages: true,
-      disallowedTools: ['WebSearch', 'WebFetch'],
+      // 'Skill' is disallowed because Claude Code's built-in Skill tool only
+      // looks in ~/.claude/skills/ and returns "Unknown skill" for skills in
+      // data/SKILLs/. The auto-routing prompt uses the Read tool instead.
+      disallowedTools: ['WebSearch', 'WebFetch', 'Skill'],
       stderr: handleSdkStderr,
       canUseTool: async (
         toolName: string,

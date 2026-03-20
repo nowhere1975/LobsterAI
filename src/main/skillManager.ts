@@ -1298,6 +1298,7 @@ export class SkillManager {
       '- IMPORTANT: If a description contains "Do NOT use" constraints, strictly respect them. If the user\'s request falls into a "Do NOT" category, treat that skill as non-matching — do NOT read its SKILL.md.',
       '- For the selected skill, treat <location> as the canonical SKILL.md path.',
       '- Resolve relative paths mentioned by that SKILL.md against its directory (dirname(<location>)), not the workspace root.',
+      '- CRITICAL: NEVER use the Skill tool to invoke a skill. Always use the Read tool to read the SKILL.md file at <location>, then execute its instructions manually. The Skill tool is not available in this environment.',
       'Constraints: never read more than one skill up front; only read additional skills if the first one explicitly references them.',
       '',
       '<available_skills>',
