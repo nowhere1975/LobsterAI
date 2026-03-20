@@ -1,0 +1,16 @@
+{
+  "name": "cn-docx",
+  "version": "1.0.0",
+  "description": "中文文档生成 skill — 支持公文（GB/T 9704-2012）和通用文档",
+  "main": "generate.js",
+  "scripts": {
+    "test": "node test.js",
+    "setup": "npm install"
+  },
+  "dependencies": {
+    "docx": "9.6.1"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
