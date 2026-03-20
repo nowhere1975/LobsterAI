@@ -1479,6 +1479,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
           method: 'POST',
           headers: {
             'x-api-key': providerConfig.apiKey,
+            'Authorization': `Bearer ${providerConfig.apiKey}`,
             'anthropic-version': '2023-06-01',
             'Content-Type': 'application/json',
           },
