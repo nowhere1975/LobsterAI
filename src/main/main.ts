@@ -315,9 +315,11 @@ const savePngWithDialog = async (
 };
 
 const configureUserDataPath = (): void => {
-  // 便携模式：由 启动.bat 注入 PORTABLE_MODE=1 环境变量
-  if (process.env.PORTABLE_MODE === '1') {
-    const exeDir = path.dirname(app.getPath('exe'));
+  // 便携模式检测：优先检查标记文件（更可靠），其次检查环境变量
+  const exeDir = path.dirname(app.getPath('exe'));
+  const portableMarker = path.join(exeDir, 'data', '.portable');
+  const isPortable = fs.existsSync(portableMarker) || process.env.PORTABLE_MODE === '1';
+  if (isPortable) {
     const portableDataDir = path.join(exeDir, 'data');
     app.setPath('userData', portableDataDir);
     app.setPath('logs', path.join(portableDataDir, 'logs'));

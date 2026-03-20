@@ -52,7 +52,9 @@ console.log(`Written: ${BAT_DST}`);
 // ── 3. data/ directory ───────────────────────────────────────────────────────
 console.log('\n=== Step 3: Create data/ directory ===');
 fs.mkdirSync(DATA_DIR, { recursive: true });
-// Write a placeholder so git/zip doesn't skip the empty dir
+// .portable marker: app detects portable mode by its presence (more reliable than env var)
+fs.writeFileSync(path.join(DATA_DIR, '.portable'), '');
+// .gitkeep so zip doesn't skip the directory
 fs.writeFileSync(path.join(DATA_DIR, '.gitkeep'), '');
 console.log(`Created: ${DATA_DIR}`);
 
