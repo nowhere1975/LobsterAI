@@ -1,11 +1,9 @@
 'use strict';
 
 const path = require('path');
-const { existsSync, readdirSync, statSync, mkdirSync, readFileSync, rmSync, cpSync, lstatSync } = require('fs');
+const { existsSync, readdirSync, statSync, mkdirSync, readFileSync, rmSync } = require('fs');
 const { spawnSync } = require('child_process');
-const asar = require('@electron/asar');
 const { ensurePortablePythonRuntime, checkRuntimeHealth } = require('./setup-python-runtime.js');
-const { syncLocalOpenClawExtensions } = require('./sync-local-openclaw-extensions.cjs');
 const { packMultipleSources } = require('./pack-openclaw-tar.cjs');
 
 function isWindowsTarget(context) {
@@ -23,180 +21,6 @@ function resolveTargetArch(context) {
   if (process.arch === 'arm64') return 'arm64';
   if (process.arch === 'ia32') return 'ia32';
   return 'x64';
-}
-
-function resolveOpenClawRuntimeTargetId(context) {
-  const platform = context?.electronPlatformName;
-  const arch = resolveTargetArch(context);
-
-  if (platform === 'darwin') {
-    return arch === 'x64' ? 'mac-x64' : 'mac-arm64';
-  }
-  if (platform === 'win32') {
-    return arch === 'arm64' ? 'win-arm64' : 'win-x64';
-  }
-  if (platform === 'linux') {
-    return arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
-  }
-
-  return null;
-}
-
-function readRuntimeBuildInfo(runtimeRoot) {
-  const buildInfoPath = path.join(runtimeRoot, 'runtime-build-info.json');
-  if (!existsSync(buildInfoPath)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(readFileSync(buildInfoPath, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function getOpenClawRuntimeBuildHint(targetId) {
-  if (!targetId) {
-    return 'npm run openclaw:runtime:host';
-  }
-  return `npm run openclaw:runtime:${targetId}`;
-}
-
-function syncCurrentOpenClawRuntimeForTarget(context) {
-  const runtimeBase = path.join(__dirname, '..', 'vendor', 'openclaw-runtime');
-  const currentRoot = path.join(runtimeBase, 'current');
-  const targetId = resolveOpenClawRuntimeTargetId(context);
-
-  if (!targetId) {
-    return { runtimeRoot: currentRoot, targetId: null };
-  }
-
-  const targetRoot = path.join(runtimeBase, targetId);
-  if (!existsSync(targetRoot)) {
-    return { runtimeRoot: currentRoot, targetId };
-  }
-
-  const currentBuildInfo = readRuntimeBuildInfo(currentRoot);
-  if (currentBuildInfo?.target !== targetId) {
-    rmSync(currentRoot, { recursive: true, force: true });
-    cpSync(targetRoot, currentRoot, { recursive: true, force: true });
-    console.log(`[electron-builder-hooks] Synced OpenClaw runtime ${targetId} -> current`);
-  }
-
-  return { runtimeRoot: currentRoot, targetId };
-}
-
-function verifyPreinstalledPlugins(runtimeRoot, buildHint) {
-  const pkgPath = path.join(__dirname, '..', 'package.json');
-  let plugins = [];
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-    plugins = (pkg.openclaw && pkg.openclaw.plugins) || [];
-  } catch {
-    return; // Cannot read package.json — skip verification
-  }
-
-  if (!Array.isArray(plugins) || plugins.length === 0) {
-    return;
-  }
-
-  const extensionsDir = path.join(runtimeRoot, 'extensions');
-  const missing = [];
-
-  for (const plugin of plugins) {
-    if (!plugin.id) continue;
-    const pluginDir = path.join(extensionsDir, plugin.id);
-    if (!existsSync(pluginDir)) {
-      missing.push(plugin.id);
-    }
-  }
-
-  if (missing.length > 0) {
-    throw new Error(
-      '[electron-builder-hooks] Preinstalled OpenClaw plugins missing from runtime: '
-      + missing.join(', ')
-      + `. Run \`${buildHint}\` (which includes openclaw:plugins) before packaging.`,
-    );
-  }
-
-  console.log(`[electron-builder-hooks] Verified ${plugins.length} preinstalled OpenClaw plugin(s).`);
-}
-
-function ensureBundledOpenClawRuntime(context) {
-  const { runtimeRoot, targetId } = syncCurrentOpenClawRuntimeForTarget(context);
-  const buildHint = getOpenClawRuntimeBuildHint(targetId);
-
-  const localMcpBridgeDir = path.join(runtimeRoot, 'extensions', 'mcp-bridge');
-  if (!existsSync(localMcpBridgeDir)) {
-    syncLocalOpenClawExtensions(runtimeRoot);
-  }
-
-  const requiredExternalPaths = [
-    path.join(runtimeRoot, 'node_modules'),
-  ];
-  const missingExternal = requiredExternalPaths.filter((candidate) => !existsSync(candidate));
-  if (missingExternal.length > 0) {
-    throw new Error(
-      '[electron-builder-hooks] Bundled OpenClaw runtime is incomplete. Missing: '
-      + missingExternal.join(', ')
-      + `. Run \`${buildHint}\` before packaging.`,
-    );
-  }
-
-  // Verify preinstalled plugins are present in the runtime extensions directory
-  verifyPreinstalledPlugins(runtimeRoot, buildHint);
-
-  const gatewayAsarPath = path.join(runtimeRoot, 'gateway.asar');
-  if (existsSync(gatewayAsarPath)) {
-    let entries;
-    try {
-      // Normalize paths: on Windows, asar.listPackage may return backslash paths
-      entries = new Set(asar.listPackage(gatewayAsarPath).map(e => e.replace(/\\/g, '/')));
-    } catch (error) {
-      throw new Error(
-        '[electron-builder-hooks] Failed to read OpenClaw gateway.asar: '
-        + `${gatewayAsarPath}. ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    const hasOpenClawEntry = entries.has('/openclaw.mjs');
-    const hasControlUiIndex = entries.has('/dist/control-ui/index.html');
-    const hasGatewayEntry = entries.has('/dist/entry.js') || entries.has('/dist/entry.mjs');
-
-    if (!hasOpenClawEntry || !hasControlUiIndex || !hasGatewayEntry) {
-      throw new Error(
-        '[electron-builder-hooks] OpenClaw gateway.asar is incomplete. '
-        + `openclaw.mjs=${hasOpenClawEntry}, control-ui=${hasControlUiIndex}, entry=${hasGatewayEntry}.`,
-      );
-    }
-
-    return;
-  }
-
-  const legacyRequiredPaths = [
-    path.join(runtimeRoot, 'openclaw.mjs'),
-    path.join(runtimeRoot, 'dist', 'control-ui', 'index.html'),
-  ];
-
-  const hasLegacyEntry = existsSync(path.join(runtimeRoot, 'dist', 'entry.js'))
-    || existsSync(path.join(runtimeRoot, 'dist', 'entry.mjs'));
-  if (!hasLegacyEntry) {
-    throw new Error(
-      '[electron-builder-hooks] Missing OpenClaw runtime entry. '
-      + `Expected ${path.join(runtimeRoot, 'dist', 'entry.js')} or ${path.join(runtimeRoot, 'dist', 'entry.mjs')}, `
-      + `or ${path.join(runtimeRoot, 'gateway.asar')}.`,
-    );
-  }
-
-  const missingLegacy = legacyRequiredPaths.filter((candidate) => !existsSync(candidate));
-  if (missingLegacy.length > 0) {
-    throw new Error(
-      '[electron-builder-hooks] Bundled OpenClaw legacy runtime is incomplete. Missing: '
-      + missingLegacy.join(', ')
-      + `. Run \`${buildHint}\` before packaging.`,
-    );
-  }
 }
 
 function findPackagedBash(appOutDir) {
@@ -312,75 +136,6 @@ function applyMacIconFix(appPath) {
 }
 
 /**
- * Remove broken symlinks from a directory recursively.
- * This fixes macOS code signing failures caused by dangling symlinks in node_modules/.bin
- */
-function removeBrokenSymlinks(dir) {
-  if (!existsSync(dir)) return 0;
-
-  let removedCount = 0;
-  const entries = readdirSync(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-
-    try {
-      if (entry.isSymbolicLink()) {
-        // Check if symlink target exists
-        try {
-          statSync(fullPath); // follows symlink
-        } catch {
-          // Symlink is broken - remove it
-          rmSync(fullPath, { force: true });
-          removedCount++;
-        }
-      } else if (entry.isDirectory()) {
-        removedCount += removeBrokenSymlinks(fullPath);
-      }
-    } catch (err) {
-      // Skip entries we can't access
-    }
-  }
-
-  return removedCount;
-}
-
-/**
- * Clean up broken symlinks in cfmind/extensions to prevent macOS signing failures.
- */
-function cleanupBrokenSymlinksInExtensions(appOutDir) {
-  const extensionsDir = path.join(appOutDir, 'Contents', 'Resources', 'cfmind', 'extensions');
-
-  if (!existsSync(extensionsDir)) {
-    return;
-  }
-
-  console.log('[electron-builder-hooks] Cleaning up broken symlinks in cfmind/extensions...');
-
-  let totalRemoved = 0;
-  const extensionEntries = readdirSync(extensionsDir, { withFileTypes: true });
-
-  for (const entry of extensionEntries) {
-    if (!entry.isDirectory()) continue;
-
-    const nodeModulesBin = path.join(extensionsDir, entry.name, 'node_modules', '.bin');
-    if (existsSync(nodeModulesBin)) {
-      const removed = removeBrokenSymlinks(nodeModulesBin);
-      if (removed > 0) {
-        console.log(`[electron-builder-hooks]   ${entry.name}: removed ${removed} broken symlink(s)`);
-        totalRemoved += removed;
-      }
-    }
-  }
-
-  if (totalRemoved > 0) {
-    console.log(`[electron-builder-hooks] ✓ Removed ${totalRemoved} broken symlink(s) total`);
-  } else {
-    console.log('[electron-builder-hooks] ✓ No broken symlinks found');
-  }
-}
-
-/**
  * Check if a command exists in the system PATH.
  */
 function hasCommand(command) {
@@ -462,27 +217,18 @@ function installSkillDependencies() {
 }
 
 async function beforePack(context) {
-  if (process.env.LOBSTERAI_PORTABLE_BUILD !== '1') {
-    ensureBundledOpenClawRuntime(context);
-  }
   // Install skill dependencies first (for all platforms)
   installSkillDependencies();
 
   if (isWindowsTarget(context)) {
-    // Pack all large resource directories into a single tar for faster NSIS
-    // installation.  NSIS extracts thousands of small files very slowly on NTFS;
-    // a single tar archive is extracted by 7z almost instantly, and we unpack
-    // it in the NSIS customInstall macro using Electron's Node runtime.
+    // Pack resource directories into a single tar for faster NSIS installation.
+    // NSIS extracts thousands of small files very slowly on NTFS; a single tar
+    // archive is extracted by the unpack script almost instantly.
     const buildTarDir = path.join(__dirname, '..', 'build-tar');
     mkdirSync(buildTarDir, { recursive: true });
 
     const outputTar = path.join(buildTarDir, 'win-resources.tar');
     const sources = [
-      {
-        label: 'OpenClaw runtime',
-        dir: path.join(__dirname, '..', 'vendor', 'openclaw-runtime', 'current'),
-        prefix: 'cfmind',
-      },
       {
         label: 'SKILLs',
         dir: path.join(__dirname, '..', 'SKILLs'),
@@ -533,8 +279,6 @@ async function afterPack(context) {
     const appPath = path.join(context.appOutDir, `${appName}.app`);
 
     if (existsSync(appPath)) {
-      // Clean up broken symlinks before signing to prevent ENOENT errors
-      cleanupBrokenSymlinksInExtensions(appPath);
       applyMacIconFix(appPath);
     } else {
       console.warn(`[electron-builder-hooks] App not found at ${appPath}, skipping icon fix`);
