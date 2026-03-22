@@ -284,12 +284,25 @@ contextBridge.exposeInMainWorld('electron', {
     syncConfig: () => ipcRenderer.invoke('im:config:sync'),
 
     // Gateway control
-    startGateway: (platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo') => ipcRenderer.invoke('im:gateway:start', platform),
-    stopGateway: (platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo') => ipcRenderer.invoke('im:gateway:stop', platform),
+    startGateway: (platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo' | 'weixin') => ipcRenderer.invoke('im:gateway:start', platform),
+    stopGateway: (platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo' | 'weixin') => ipcRenderer.invoke('im:gateway:stop', platform),
     testGateway: (
-      platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo',
+      platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo' | 'weixin',
       configOverride?: any
     ) => ipcRenderer.invoke('im:gateway:test', platform, configOverride),
+
+    // WeChat (微信) — QR-code login flow
+    weixinLogin: () => ipcRenderer.invoke('im:weixin:login'),
+    onWeixinLoginOutput: (callback: (text: string) => void) => {
+      const handler = (_event: any, text: string) => callback(text);
+      ipcRenderer.on('im:weixin:login:output', handler);
+      return () => ipcRenderer.removeListener('im:weixin:login:output', handler);
+    },
+    onWeixinLoginDone: (callback: (result: { code: number; error?: string }) => void) => {
+      const handler = (_event: any, result: any) => callback(result);
+      ipcRenderer.on('im:weixin:login:done', handler);
+      return () => ipcRenderer.removeListener('im:weixin:login:done', handler);
+    },
 
     // Status
     getStatus: () => ipcRenderer.invoke('im:status:get'),

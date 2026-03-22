@@ -3,6 +3,7 @@ import type { WebContents } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { spawn } from 'child_process';
 import { SqliteStore } from './sqliteStore';
 import { CoworkStore } from './coworkStore';
 import { CoworkRunner } from './libs/coworkRunner';
@@ -800,6 +801,13 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
       getNimConfig: () => {
         try {
           return getIMGatewayManager().getConfig().nim;
+        } catch {
+          return null;
+        }
+      },
+      getWeixinConfig: () => {
+        try {
+          return getIMGatewayManager().getConfig().weixin ?? null;
         } catch {
           return null;
         }
@@ -2924,6 +2932,67 @@ if (!gotTheLock) {
         error: error instanceof Error ? error.message : 'Failed to get IM status',
       };
     }
+  });
+
+  // WeChat (微信) login — spawns `openclaw channels login --channel openclaw-weixin`
+  // and streams stdout/stderr back to the renderer so it can display the QR code.
+  ipcMain.handle('im:weixin:login', async (event) => {
+    // Resolve the openclaw runtime entry script (same resolution used by the gateway)
+    const runtimeCandidates = app.isPackaged
+      ? [path.join(process.resourcesPath, 'cfmind')]
+      : [
+          path.join(app.getAppPath(), 'vendor', 'openclaw-runtime', 'current'),
+          path.join(process.cwd(), 'vendor', 'openclaw-runtime', 'current'),
+        ];
+    const runtimeRoot = runtimeCandidates.find((p) => fs.existsSync(p)) ?? null;
+    const openclawEntry: string | null = runtimeRoot
+      ? (() => {
+          const candidates = [
+            path.join(runtimeRoot, 'openclaw.mjs'),
+            path.join(runtimeRoot, 'dist', 'entry.js'),
+          ];
+          return candidates.find((p) => fs.existsSync(p)) ?? null;
+        })()
+      : null;
+
+    if (!openclawEntry) {
+      return { success: false, error: 'OpenClaw runtime not found. Please ensure OpenClaw is installed.' };
+    }
+
+    return new Promise<{ success: boolean; error?: string }>((resolve) => {
+      const child = spawn(
+        process.execPath,
+        [openclawEntry, 'channels', 'login', '--channel', 'openclaw-weixin'],
+        {
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+          windowsHide: true,
+        }
+      );
+
+      const sendChunk = (chunk: Buffer | string) => {
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('im:weixin:login:output', text);
+        }
+      };
+
+      child.stdout?.on('data', sendChunk);
+      child.stderr?.on('data', sendChunk);
+
+      child.on('close', (code) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('im:weixin:login:done', { code });
+        }
+        resolve({ success: code === 0 });
+      });
+
+      child.on('error', (err) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('im:weixin:login:done', { code: -1, error: err.message });
+        }
+        resolve({ success: false, error: err.message });
+      });
+    });
   });
 
   ipcMain.handle('im:getLocalIp', () => {

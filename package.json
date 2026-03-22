@@ -8,13 +8,13 @@
   "license": "MIT",
   "version": "2026.3.20",
   "openclaw": {
-    "version": "v2026.3.2",
+    "version": "v2026.3.13",
     "repo": "https://github.com/openclaw/openclaw.git",
     "plugins": [
       {
         "id": "dingtalk-connector",
         "npm": "@dingtalk-real-ai/dingtalk-connector",
-        "version": "0.7.9"
+        "version": "0.8.1"
       },
       {
         "id": "feishu-openclaw-plugin",
@@ -24,12 +24,17 @@
       {
         "id": "qqbot",
         "npm": "@sliverp/qqbot",
-        "version": "1.5.3"
+        "version": "1.6.1"
       },
       {
         "id": "wecom-openclaw-plugin",
         "npm": "@wecom/wecom-openclaw-plugin",
-        "version": "1.0.12"
+        "version": "2026.3.20"
+      },
+      {
+        "id": "openclaw-weixin",
+        "npm": "@tencent-weixin/openclaw-weixin",
+        "version": "1.0.2"
       },
       {
         "id": "moltbot-popo",
@@ -41,7 +46,7 @@
       {
         "id": "nim",
         "npm": "openclaw-nim",
-        "version": "0.3.0"
+        "version": "0.4.2"
       }
     ]
   },
@@ -98,7 +103,7 @@
     "fix:mac-icon": "bash scripts/fix-mac-icon-display.sh"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.2.12",
+    "@anthropic-ai/claude-agent-sdk": "0.2.81",
     "@electron/remote": "^2.0.12",
     "@headlessui/react": "^1.7.18",
     "@heroicons/react": "^2.1.1",

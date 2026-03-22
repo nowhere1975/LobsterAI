@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import type { CoworkConfig, CoworkExecutionMode } from '../coworkStore';
 import type { TelegramOpenClawConfig, DiscordOpenClawConfig } from '../im/types';
-import type { DingTalkOpenClawConfig, FeishuOpenClawConfig, QQOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig, NimConfig } from '../im/types';
+import type { DingTalkOpenClawConfig, FeishuOpenClawConfig, QQOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig, NimConfig, WeixinOpenClawConfig } from '../im/types';
 import { resolveRawApiConfig } from './claudeSettings';
 import type { OpenClawEngineManager } from './openclawEngineManager';
 import { parseChannelSessionKey } from './openclawChannelSessionSync';
@@ -430,6 +430,7 @@ type OpenClawConfigSyncDeps = {
   getWecomConfig: () => WecomOpenClawConfig | null;
   getPopoConfig: () => PopoOpenClawConfig | null;
   getNimConfig: () => NimConfig | null;
+  getWeixinConfig?: () => WeixinOpenClawConfig | null;
   getMcpBridgeConfig?: () => McpBridgeConfig | null;
   getSkillsList?: () => Array<{ id: string; enabled: boolean }>;
 };
@@ -445,6 +446,7 @@ export class OpenClawConfigSync {
   private readonly getWecomConfig: () => WecomOpenClawConfig | null;
   private readonly getPopoConfig: () => PopoOpenClawConfig | null;
   private readonly getNimConfig: () => NimConfig | null;
+  private readonly getWeixinConfig?: () => WeixinOpenClawConfig | null;
   private readonly getMcpBridgeConfig?: () => McpBridgeConfig | null;
   private readonly getSkillsList?: () => Array<{ id: string; enabled: boolean }>;
 
@@ -459,6 +461,7 @@ export class OpenClawConfigSync {
     this.getWecomConfig = deps.getWecomConfig;
     this.getPopoConfig = deps.getPopoConfig;
     this.getNimConfig = deps.getNimConfig;
+    this.getWeixinConfig = deps.getWeixinConfig;
     this.getMcpBridgeConfig = deps.getMcpBridgeConfig;
     this.getSkillsList = deps.getSkillsList;
   }
@@ -522,8 +525,10 @@ export class OpenClawConfigSync {
     const wecomConfig = this.getWecomConfig();
 
     const popoConfig = this.getPopoConfig();
-    
+
     const nimConfig = this.getNimConfig();
+
+    const weixinConfig = this.getWeixinConfig?.();
 
     const hasAnyChannel = hasDingTalkOpenClaw;
 
@@ -602,6 +607,7 @@ export class OpenClawConfigSync {
                 if (id === 'wecom-openclaw-plugin') return !!(wecomConfig?.enabled && wecomConfig.botId);
                 if (id === 'moltbot-popo') return !!(popoConfig?.enabled && popoConfig.appKey);
                 if (id === 'nim') return !!(nimConfig?.enabled && nimConfig.appKey && nimConfig.account && nimConfig.token);
+                if (id === 'openclaw-weixin') return !!(weixinConfig?.enabled);
                 return true; // other plugins stay enabled
               })();
               return [id, { enabled: pluginEnabled }];

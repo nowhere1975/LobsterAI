@@ -499,6 +499,13 @@ export class IMGatewayManager extends EventEmitter {
         lastInboundAt: null as number | null,
         lastOutboundAt: null as number | null,
       },
+      weixin: {
+        connected: Boolean(config.weixin?.enabled),
+        startedAt: null as number | null,
+        lastError: null as string | null,
+        lastInboundAt: null as number | null,
+        lastOutboundAt: null as number | null,
+      },
     };
   }
 
@@ -748,6 +755,12 @@ export class IMGatewayManager extends EventEmitter {
       await this.syncOpenClawConfig?.();
       await this.ensureOpenClawGatewayConnected?.();
       return;
+    } else if (platform === 'weixin') {
+      // WeChat (微信) runs via OpenClaw gateway (openclaw-weixin plugin)
+      console.log('[IMGatewayManager] WeChat in OpenClaw mode, syncing config instead of starting direct gateway');
+      await this.syncOpenClawConfig?.();
+      await this.ensureOpenClawGatewayConnected?.();
+      return;
     }
 
     // Restore persisted notification target
@@ -795,6 +808,11 @@ export class IMGatewayManager extends EventEmitter {
     } else if (platform === 'popo') {
       // POPO runs via OpenClaw gateway
       console.log('[IMGatewayManager] POPO in OpenClaw mode, syncing disabled config');
+      await this.syncOpenClawConfig?.();
+      return;
+    } else if (platform === 'weixin') {
+      // WeChat runs via OpenClaw gateway
+      console.log('[IMGatewayManager] WeChat in OpenClaw mode, syncing disabled config');
       await this.syncOpenClawConfig?.();
       return;
     }
@@ -852,6 +870,9 @@ export class IMGatewayManager extends EventEmitter {
     }
     if (config.nim?.enabled && config.nim.appKey && config.nim.account && config.nim.token) {
       openClawPlatformsToStart.push('nim');
+    }
+    if (config.weixin?.enabled) {
+      openClawPlatformsToStart.push('weixin');
     }
 
     if (openClawPlatformsToStart.length > 0) {

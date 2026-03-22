@@ -9,9 +9,9 @@ import { SignalIcon, XMarkIcon, CheckCircleIcon, XCircleIcon, ExclamationTriangl
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
 import { RootState } from '../../store';
 import { imService } from '../../services/im';
-import { setDingTalkConfig, setFeishuConfig, setTelegramOpenClawConfig, setQQConfig, setDiscordConfig, setNimConfig, setXiaomifengConfig, setWecomConfig, setPopoConfig, clearError } from '../../store/slices/imSlice';
+import { setDingTalkConfig, setFeishuConfig, setTelegramOpenClawConfig, setQQConfig, setDiscordConfig, setNimConfig, setXiaomifengConfig, setWecomConfig, setPopoConfig, setWeixinConfig, clearError } from '../../store/slices/imSlice';
 import { i18nService } from '../../services/i18n';
-import type { IMPlatform, IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, TelegramOpenClawConfig, DiscordOpenClawConfig, FeishuOpenClawConfig, DingTalkOpenClawConfig, QQOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig } from '../../types/im';
+import type { IMPlatform, IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, TelegramOpenClawConfig, DiscordOpenClawConfig, FeishuOpenClawConfig, DingTalkOpenClawConfig, QQOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig, WeixinOpenClawConfig } from '../../types/im';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 import WecomAIBotSDK from '@wecom/wecom-aibot-sdk';
 import { SchemaForm } from './SchemaForm';
@@ -28,6 +28,7 @@ const platformLogos: Record<IMPlatform, string> = {
   xiaomifeng: 'xiaomifeng.png',
   wecom: 'wecom.png',
   popo: 'popo.png',
+  weixin: 'weixin.svg',
 };
 
 // IM platform setup guide URLs
@@ -131,6 +132,10 @@ const IMSettings: React.FC = () => {
   // WeCom quick setup state
   const [wecomQuickSetupStatus, setWecomQuickSetupStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
   const [wecomQuickSetupError, setWecomQuickSetupError] = useState<string>('');
+
+  // WeChat (微信) login state
+  const [weixinLoginStatus, setWeixinLoginStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+  const [weixinLoginOutput, setWeixinLoginOutput] = useState<string>('');
   const [localIp, setLocalIp] = useState<string>('');
   const isMountedRef = useRef(true);
 
@@ -163,6 +168,10 @@ const IMSettings: React.FC = () => {
     if (activePlatform !== 'wecom') {
       setWecomQuickSetupStatus('idle');
       setWecomQuickSetupError('');
+    }
+    if (activePlatform !== 'weixin') {
+      setWeixinLoginStatus('idle');
+      setWeixinLoginOutput('');
     }
   }, [activePlatform]);
 
@@ -324,6 +333,36 @@ const IMSettings: React.FC = () => {
     await imService.persistConfig({ wecom: configToSave });
   };
 
+  // Handle WeChat (微信) config
+  const weixinConfig: WeixinOpenClawConfig = config.weixin ?? { enabled: false };
+
+  const handleWeixinLogin = async () => {
+    setWeixinLoginStatus('pending');
+    setWeixinLoginOutput('');
+
+    const unsubOutput = window.electron?.im?.onWeixinLoginOutput?.((text: string) => {
+      setWeixinLoginOutput((prev) => prev + text);
+    });
+    const unsubDone = window.electron?.im?.onWeixinLoginDone?.((result: { code: number; error?: string }) => {
+      unsubOutput?.();
+      unsubDone?.();
+      if (!isMountedRef.current) return;
+      if (result.code === 0) {
+        setWeixinLoginStatus('success');
+      } else {
+        setWeixinLoginStatus('error');
+      }
+    });
+
+    try {
+      await window.electron?.im?.weixinLogin?.();
+    } catch {
+      unsubOutput?.();
+      unsubDone?.();
+      if (isMountedRef.current) setWeixinLoginStatus('error');
+    }
+  };
+
   // Handle POPO OpenClaw config change
   const popoConfig = config.popo;
   const handlePopoChange = (update: Partial<PopoOpenClawConfig>) => {
@@ -412,6 +451,12 @@ const IMSettings: React.FC = () => {
     // For POPO, save popo config directly (OpenClaw mode)
     if (activePlatform === 'popo') {
       await imService.persistConfig({ popo: popoConfig });
+      return;
+    }
+
+    // For WeChat, save weixin config directly (OpenClaw mode)
+    if (activePlatform === 'weixin') {
+      await imService.persistConfig({ weixin: weixinConfig });
       return;
     }
 
@@ -549,6 +594,18 @@ const IMSettings: React.FC = () => {
         }
         return;
       }
+
+      if (platform === 'weixin') {
+        const newEnabled = !weixinConfig.enabled;
+        const success = await imService.updateConfig({ weixin: { ...weixinConfig, enabled: newEnabled } });
+        if (success) {
+          dispatch(setWeixinConfig({ enabled: newEnabled }));
+          if (newEnabled) dispatch(clearError());
+          await imService.loadStatus();
+        }
+        return;
+      }
+
       if (platform === 'nim') {
         const newEnabled = !config.nim.enabled;
         const success = await imService.updateConfig({ nim: { ...config.nim, enabled: newEnabled } });
@@ -601,6 +658,7 @@ const IMSettings: React.FC = () => {
   const qqConnected = status.qq?.connected ?? false;
   const wecomConnected = status.wecom?.connected ?? false;
   const popoConnected = status.popo?.connected ?? false;
+  const weixinConnected = status.weixin?.connected ?? false;
 
   // Compute visible platforms based on language
   const platforms = useMemo<IMPlatform[]>(() => {
@@ -641,6 +699,8 @@ const IMSettings: React.FC = () => {
     if (platform === 'popo') {
       return !!(config.popo.appKey && config.popo.appSecret && config.popo.token && config.popo.aesKey);
     }
+    // WeChat uses QR-code login; can always be started once enabled
+    if (platform === 'weixin') return true;
     return !!(config.feishu.appId && config.feishu.appSecret);
   };
 
@@ -659,6 +719,7 @@ const IMSettings: React.FC = () => {
     if (platform === 'qq') return qqConnected;
     if (platform === 'wecom') return wecomConnected;
     if (platform === 'popo') return popoConnected;
+    if (platform === 'weixin') return weixinConnected;
     return feishuConnected;
   };
 
@@ -796,6 +857,7 @@ const IMSettings: React.FC = () => {
       xiaomifeng: setXiaomifengConfig,
       wecom: setWecomConfig,
       popo: setPopoConfig,
+      weixin: setWeixinConfig,
     };
     return actionMap[platform];
   };
@@ -3442,6 +3504,68 @@ const IMSettings: React.FC = () => {
                 {status.popo.lastError}
               </div>
             )}
+          </div>
+        )}
+
+        {activePlatform === 'weixin' && (
+          <div className="space-y-3">
+            {/* Setup guide */}
+            <PlatformGuide
+              steps={[
+                i18nService.t('imWeixinGuideStep1'),
+                i18nService.t('imWeixinGuideStep2'),
+                i18nService.t('imWeixinGuideStep3'),
+              ]}
+            />
+
+            {/* Login button */}
+            <div className="rounded-lg border border-dashed dark:border-claude-darkBorder/60 border-claude-border/60 p-4 text-center space-y-2">
+              <button
+                type="button"
+                disabled={weixinLoginStatus === 'pending'}
+                onClick={handleWeixinLogin}
+                className="px-4 py-2.5 rounded-lg text-sm font-medium bg-[#07C160] text-white hover:bg-[#07C160]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {weixinLoginStatus === 'pending'
+                  ? i18nService.t('imWeixinLoginPending')
+                  : i18nService.t('imWeixinLoginBtn')}
+              </button>
+              <p className="text-xs text-claude-textSecondary dark:text-claude-darkTextSecondary">
+                {i18nService.t('imWeixinLoginHint')}
+              </p>
+
+              {/* Terminal output (QR code) */}
+              {weixinLoginOutput && (
+                <pre className="text-left text-[10px] leading-tight font-mono bg-black text-green-400 rounded-lg p-3 overflow-auto max-h-64 mt-2 whitespace-pre">
+                  {weixinLoginOutput}
+                </pre>
+              )}
+
+              {weixinLoginStatus === 'success' && (
+                <div className="flex items-center justify-center gap-1.5 text-xs text-green-600 dark:text-green-400 bg-green-500/10 px-3 py-2 rounded-lg">
+                  <CheckCircleIcon className="h-4 w-4 flex-shrink-0" />
+                  {i18nService.t('imWeixinLoginSuccess')}
+                </div>
+              )}
+              {weixinLoginStatus === 'error' && (
+                <div className="flex items-center justify-center gap-1.5 text-xs text-red-500 bg-red-500/10 px-3 py-2 rounded-lg">
+                  <XCircleIcon className="h-4 w-4 flex-shrink-0" />
+                  {i18nService.t('imWeixinLoginError')}
+                </div>
+              )}
+            </div>
+
+            {/* Multi-account note */}
+            <details className="rounded-lg border dark:border-claude-darkBorder/40 border-claude-border/40 overflow-hidden">
+              <summary className="px-3 py-2 text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary cursor-pointer select-none">
+                {i18nService.t('imWeixinMultiAccount')}
+              </summary>
+              <div className="px-3 pb-3 pt-1">
+                <p className="text-xs text-claude-textSecondary dark:text-claude-darkTextSecondary leading-relaxed">
+                  {i18nService.t('imWeixinMultiAccountHint')}
+                </p>
+              </div>
+            </details>
           </div>
         )}
 
