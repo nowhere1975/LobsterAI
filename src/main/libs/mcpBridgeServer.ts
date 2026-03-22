@@ -1,7 +1,7 @@
 /**
- * McpBridgeServer — lightweight HTTP callback endpoint for the OpenClaw MCP Bridge.
+ * McpBridgeServer — lightweight HTTP callback endpoint for the MCP Bridge.
  *
- * OpenClaw's mcp-bridge plugin calls this endpoint to execute MCP tools.
+ * The mcp-bridge plugin calls this endpoint to execute MCP tools.
  * Binds to 127.0.0.1 only (local traffic).
  */
 import http from 'http';

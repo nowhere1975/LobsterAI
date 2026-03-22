@@ -43,7 +43,7 @@ const RunSessionModal: React.FC<RunSessionModalProps> = ({ sessionId, sessionKey
         }
       }
 
-      // 2. If not found locally, try resolving via OpenClaw sessionKey
+      // 2. If not found locally, try resolving via sessionKey
       if (!loadedSession && sessionKey) {
         const result = await window.electron?.scheduledTasks?.resolveSession(sessionKey);
         if (result?.success && result.session) {

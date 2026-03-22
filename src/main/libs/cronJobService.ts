@@ -300,7 +300,7 @@ export class CronJobService {
       client = this.getGatewayClient();
     }
     if (!client) {
-      throw new Error('OpenClaw gateway client is unavailable for cron operations.');
+      throw new Error('Cron gateway client is unavailable for cron operations.');
     }
     return client;
   }

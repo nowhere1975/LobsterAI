@@ -1,12 +1,10 @@
 /**
- * OpenClaw MEMORY.md file-based memory management.
+ * MEMORY.md file-based memory management for cowork sessions.
  *
- * Reads and writes the curated long-term memory file that OpenClaw's
- * memory_search / memory_get tools index automatically.
- *
- * The file may contain mixed content (headings, prose, bullet lists).
- * Only top-level bullet lines (`- text`) are treated as memory entries.
- * Non-bullet content (## headings, paragraphs, etc.) is preserved on writes.
+ * Reads and writes the curated long-term memory file that is indexed by
+ * the cowork agent. The file may contain mixed content (headings, prose,
+ * bullet lists). Only top-level bullet lines (`- text`) are treated as
+ * memory entries. Non-bullet content is preserved on writes.
  */
 
 import crypto from 'crypto';
@@ -15,40 +13,36 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const TAG = '[OpenClaw Memory]';
+const TAG = '[CoworkMemory]';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface OpenClawMemoryEntry {
+export interface CoworkMemoryEntry {
   /** SHA-1 of the normalised text – stable across reads. */
   id: string;
   /** Raw text without the leading "- ". */
   text: string;
 }
 
-export interface OpenClawMemoryStats {
-  total: number;
-}
-
 // ---------------------------------------------------------------------------
 // Path resolution
 // ---------------------------------------------------------------------------
 
-const DEFAULT_OPENCLAW_WORKSPACE = path.join(os.homedir(), '.openclaw', 'workspace');
+const DEFAULT_COWORK_WORKSPACE = path.join(os.homedir(), 'lobsterai', 'project');
 
 /**
  * Resolve the MEMORY.md path from the user-configured working directory.
- * Falls back to `~/.openclaw/workspace/MEMORY.md` when unset.
+ * Falls back to `~/lobsterai/project/MEMORY.md` when unset.
  */
 export function resolveMemoryFilePath(workingDirectory: string | undefined): string {
   const dir = (workingDirectory || '').trim();
-  return path.join(dir || DEFAULT_OPENCLAW_WORKSPACE, 'MEMORY.md');
+  return path.join(dir || DEFAULT_COWORK_WORKSPACE, 'MEMORY.md');
 }
 
 // ---------------------------------------------------------------------------
-// Fingerprinting (matches sqliteStore.ts logic)
+// Fingerprinting
 // ---------------------------------------------------------------------------
 
 function normalizeForFingerprint(text: string): string {
@@ -86,10 +80,10 @@ const HEADER = '# User Memories';
  * Recognises lines starting with `- ` (single dash + space).
  * Code blocks are stripped before parsing to avoid false positives.
  */
-export function parseMemoryMd(content: string): OpenClawMemoryEntry[] {
+export function parseMemoryMd(content: string): CoworkMemoryEntry[] {
   const stripped = content.replace(/```[\s\S]*?```/g, ' ');
   const lines = stripped.split(/\r?\n/);
-  const entries: OpenClawMemoryEntry[] = [];
+  const entries: CoworkMemoryEntry[] = [];
   const seen = new Set<string>();
 
   for (const line of lines) {
@@ -110,7 +104,7 @@ export function parseMemoryMd(content: string): OpenClawMemoryEntry[] {
 /**
  * Serialise entries back to MEMORY.md format (standalone, no existing content).
  */
-export function serializeMemoryMd(entries: OpenClawMemoryEntry[]): string {
+export function serializeMemoryMd(entries: CoworkMemoryEntry[]): string {
   if (entries.length === 0) return `${HEADER}\n`;
   const lines = entries.map((e) => `- ${e.text}`);
   return `${HEADER}\n\n${lines.join('\n')}\n`;
@@ -119,16 +113,10 @@ export function serializeMemoryMd(entries: OpenClawMemoryEntry[]): string {
 /**
  * Build updated MEMORY.md content by surgically replacing bullet lines
  * while preserving all non-bullet content (headings, prose, sections).
- *
- * Strategy:
- *   1. Walk original lines; collect non-bullet lines verbatim.
- *   2. Replace the first contiguous bullet block with the new entries.
- *   3. Remove all other bullet lines (to avoid duplicates).
- *   4. If no bullet block existed, append entries at the end.
  */
 function rebuildMemoryMd(
   originalContent: string,
-  entries: OpenClawMemoryEntry[],
+  entries: CoworkMemoryEntry[],
 ): string {
   if (!originalContent.trim()) {
     return serializeMemoryMd(entries);
@@ -137,11 +125,9 @@ function rebuildMemoryMd(
   const lines = originalContent.split(/\r?\n/);
   const result: string[] = [];
   let bulletBlockInserted = false;
-  // Track whether we are inside a fenced code block
   let inCodeBlock = false;
 
   for (const line of lines) {
-    // Toggle code-block state
     if (line.trimStart().startsWith('```')) {
       inCodeBlock = !inCodeBlock;
       result.push(line);
@@ -153,21 +139,18 @@ function rebuildMemoryMd(
     }
 
     if (isBulletLine(line)) {
-      // First bullet block → insert all new entries here
       if (!bulletBlockInserted) {
         bulletBlockInserted = true;
         for (const e of entries) {
           result.push(`- ${e.text}`);
         }
       }
-      // Skip original bullet line (already replaced by new entries)
       continue;
     }
 
     result.push(line);
   }
 
-  // No bullet block in original → append entries at the end
   if (!bulletBlockInserted && entries.length > 0) {
     result.push('');
     for (const e of entries) {
@@ -175,7 +158,6 @@ function rebuildMemoryMd(
     }
   }
 
-  // Ensure trailing newline
   const text = result.join('\n');
   return text.endsWith('\n') ? text : text + '\n';
 }
@@ -203,24 +185,23 @@ function readFileOrEmpty(filePath: string): string {
 // CRUD operations
 // ---------------------------------------------------------------------------
 
-export function readMemoryEntries(filePath: string): OpenClawMemoryEntry[] {
-  const entries = parseMemoryMd(readFileOrEmpty(filePath));
-  return entries;
+export function readMemoryEntries(filePath: string): CoworkMemoryEntry[] {
+  return parseMemoryMd(readFileOrEmpty(filePath));
 }
 
-export function writeMemoryEntries(filePath: string, entries: OpenClawMemoryEntry[]): void {
+export function writeMemoryEntries(filePath: string, entries: CoworkMemoryEntry[]): void {
   ensureDir(filePath);
   const original = readFileOrEmpty(filePath);
   fs.writeFileSync(filePath, rebuildMemoryMd(original, entries), 'utf8');
   console.log(`${TAG} writeMemoryEntries: wrote ${entries.length} entries to ${filePath}`);
 }
 
-export function addMemoryEntry(filePath: string, text: string): OpenClawMemoryEntry {
+export function addMemoryEntry(filePath: string, text: string): CoworkMemoryEntry {
   const trimmed = text.replace(/\s+/g, ' ').trim();
   if (!trimmed) throw new Error('Memory text is required');
 
   const entries = readMemoryEntries(filePath);
-  const entry: OpenClawMemoryEntry = { id: fingerprint(trimmed), text: trimmed };
+  const entry: CoworkMemoryEntry = { id: fingerprint(trimmed), text: trimmed };
 
   if (entries.some((e) => e.id === entry.id)) {
     console.log(`${TAG} addMemoryEntry: duplicate skipped (id=${entry.id.slice(0, 8)}…)`);
@@ -237,7 +218,7 @@ export function updateMemoryEntry(
   filePath: string,
   id: string,
   newText: string,
-): OpenClawMemoryEntry | null {
+): CoworkMemoryEntry | null {
   const trimmed = newText.replace(/\s+/g, ' ').trim();
   if (!trimmed) throw new Error('Memory text is required');
 
@@ -248,8 +229,7 @@ export function updateMemoryEntry(
     return null;
   }
 
-  // Note: ID changes because it's content-based (fingerprint of text)
-  const updated: OpenClawMemoryEntry = { id: fingerprint(trimmed), text: trimmed };
+  const updated: CoworkMemoryEntry = { id: fingerprint(trimmed), text: trimmed };
   const oldText = entries[idx].text;
   entries[idx] = updated;
   writeMemoryEntries(filePath, entries);
@@ -274,7 +254,7 @@ export function deleteMemoryEntry(filePath: string, id: string): boolean {
 export function searchMemoryEntries(
   filePath: string,
   query: string,
-): OpenClawMemoryEntry[] {
+): CoworkMemoryEntry[] {
   const q = query.toLowerCase().trim();
   if (!q) return readMemoryEntries(filePath);
   const all = readMemoryEntries(filePath);
@@ -288,11 +268,8 @@ export function searchMemoryEntries(
 // ---------------------------------------------------------------------------
 
 export interface MigrationDataSource {
-  /** Whether migration was already performed. */
   isMigrationDone(): boolean;
-  /** Mark migration as completed. */
   markMigrationDone(): void;
-  /** Retrieve active memory texts from SQLite (status != 'deleted'). */
   getActiveMemoryTexts(): string[];
 }
 
@@ -346,7 +323,6 @@ export function migrateSqliteToMemoryMd(
     return added;
   } catch (error) {
     console.error(`${TAG} Migration: FAILED —`, error instanceof Error ? error.message : error);
-    // Do NOT mark done so it retries next time
     return 0;
   }
 }
@@ -375,26 +351,17 @@ function validateBootstrapFilename(filename: string): void {
   }
 }
 
-/**
- * Resolve the path to a bootstrap file in the workspace directory.
- */
 export function resolveBootstrapFilePath(workingDirectory: string | undefined, filename: string): string {
   validateBootstrapFilename(filename);
   const dir = (workingDirectory || '').trim();
-  return path.join(dir || DEFAULT_OPENCLAW_WORKSPACE, filename);
+  return path.join(dir || DEFAULT_COWORK_WORKSPACE, filename);
 }
 
-/**
- * Read a bootstrap file's content. Returns empty string if file doesn't exist.
- */
 export function readBootstrapFile(workingDirectory: string | undefined, filename: string): string {
   const filePath = resolveBootstrapFilePath(workingDirectory, filename);
   return readFileOrEmpty(filePath);
 }
 
-/**
- * Write content to a bootstrap file, creating the directory if needed.
- */
 export function writeBootstrapFile(workingDirectory: string | undefined, filename: string, content: string): void {
   const filePath = resolveBootstrapFilePath(workingDirectory, filename);
   ensureDir(filePath);
@@ -402,14 +369,10 @@ export function writeBootstrapFile(workingDirectory: string | undefined, filenam
   console.log(`${TAG} writeBootstrapFile: wrote ${filename} (${content.length} chars) to ${filePath}`);
 }
 
-/**
- * Ensure IDENTITY.md exists in the workspace with built-in default content.
- * Only writes if the file doesn't exist or is empty — never overwrites user content.
- */
 export function ensureDefaultIdentity(workingDirectory: string | undefined): void {
   const filePath = resolveBootstrapFilePath(workingDirectory, 'IDENTITY.md');
   const existing = readFileOrEmpty(filePath);
-  if (existing.trim()) return; // already has content, don't overwrite
+  if (existing.trim()) return;
   const defaultContent = getDefaultIdentity();
   ensureDir(filePath);
   fs.writeFileSync(filePath, defaultContent, 'utf8');
@@ -420,10 +383,6 @@ export function ensureDefaultIdentity(workingDirectory: string | undefined): voi
 // Workspace change sync
 // ---------------------------------------------------------------------------
 
-/**
- * Sync MEMORY.md when workspace directory changes.
- * Copies entries from old path to new path (merge-dedup, keeps old file as backup).
- */
 export function syncMemoryFileOnWorkspaceChange(
   oldWorkingDirectory: string | undefined,
   newWorkingDirectory: string | undefined,
@@ -464,16 +423,6 @@ export function syncMemoryFileOnWorkspaceChange(
 
     if (added > 0) {
       writeMemoryEntries(newPath, newEntries);
-    }
-
-    // Ensure memory/ directory exists for OpenClaw daily logs
-    const memoryDir = path.join(
-      (newWorkingDirectory || '').trim() || DEFAULT_OPENCLAW_WORKSPACE,
-      'memory',
-    );
-    if (!fs.existsSync(memoryDir)) {
-      console.log(`${TAG} Workspace sync: creating memory/ dir at ${memoryDir}`);
-      fs.mkdirSync(memoryDir, { recursive: true });
     }
 
     console.log(`${TAG} Workspace sync: done — copied ${added} new entries (old=${oldEntries.length}, new total=${newEntries.length})`);

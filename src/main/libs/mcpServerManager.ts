@@ -1,6 +1,6 @@
 /**
  * McpServerManager — manages MCP server lifecycles and tool discovery
- * for the OpenClaw MCP Bridge.
+ * for the MCP Bridge.
  *
  * Starts enabled MCP servers as child processes via the MCP SDK stdio transport,
  * discovers available tools, and routes tool calls to the correct server.

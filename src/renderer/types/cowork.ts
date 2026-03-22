@@ -13,7 +13,7 @@ export type CoworkMessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result
 
 // Cowork execution mode
 export type CoworkExecutionMode = 'auto' | 'local' | 'sandbox';
-export type CoworkAgentEngine = 'openclaw' | 'yd_cowork';
+export type CoworkAgentEngine = 'yd_cowork';
 
 // Cowork message metadata
 export interface CoworkMessageMetadata {
@@ -85,22 +85,6 @@ export interface CoworkApiConfig {
   baseURL: string;
   model: string;
   apiType?: 'anthropic' | 'openai';
-}
-
-export type OpenClawEnginePhase =
-  | 'not_installed'
-  | 'installing'
-  | 'ready'
-  | 'starting'
-  | 'running'
-  | 'error';
-
-export interface OpenClawEngineStatus {
-  phase: OpenClawEnginePhase;
-  version: string | null;
-  progressPercent?: number;
-  message?: string;
-  canRetry: boolean;
 }
 
 export interface CoworkUserMemoryEntry {

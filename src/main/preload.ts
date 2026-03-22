@@ -118,19 +118,6 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('generate-session-title', userInput),
   getRecentCwds: (limit?: number) =>
     ipcRenderer.invoke('get-recent-cwds', limit),
-  openclaw: {
-    engine: {
-      getStatus: () => ipcRenderer.invoke('openclaw:engine:getStatus'),
-      install: () => ipcRenderer.invoke('openclaw:engine:install'),
-      retryInstall: () => ipcRenderer.invoke('openclaw:engine:retryInstall'),
-      restartGateway: () => ipcRenderer.invoke('openclaw:engine:restartGateway'),
-      onProgress: (callback: (status: any) => void) => {
-        const handler = (_event: any, status: any) => callback(status);
-        ipcRenderer.on('openclaw:engine:onProgress', handler);
-        return () => ipcRenderer.removeListener('openclaw:engine:onProgress', handler);
-      },
-    },
-  },
   cowork: {
     // Session management
     startSession: (options: { prompt: string; cwd?: string; systemPrompt?: string; activeSkillIds?: string[]; imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }> }) =>
@@ -168,7 +155,7 @@ contextBridge.exposeInMainWorld('electron', {
     setConfig: (config: {
       workingDirectory?: string;
       executionMode?: 'auto' | 'local' | 'sandbox';
-      agentEngine?: 'openclaw' | 'yd_cowork';
+      agentEngine?: 'yd_cowork';
       memoryEnabled?: boolean;
       memoryImplicitUpdateEnabled?: boolean;
       memoryLlmJudgeEnabled?: boolean;
@@ -276,44 +263,6 @@ contextBridge.exposeInMainWorld('electron', {
     getPath: () => ipcRenderer.invoke('log:getPath'),
     openFolder: () => ipcRenderer.invoke('log:openFolder'),
     exportZip: () => ipcRenderer.invoke('log:exportZip'),
-  },
-  im: {
-    // Configuration
-    getConfig: () => ipcRenderer.invoke('im:config:get'),
-    setConfig: (config: any, options?: { syncGateway?: boolean }) => ipcRenderer.invoke('im:config:set', config, options),
-    syncConfig: () => ipcRenderer.invoke('im:config:sync'),
-
-    // Gateway control
-    startGateway: (platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo') => ipcRenderer.invoke('im:gateway:start', platform),
-    stopGateway: (platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo') => ipcRenderer.invoke('im:gateway:stop', platform),
-    testGateway: (
-      platform: 'dingtalk' | 'feishu' | 'telegram' | 'discord' | 'nim' | 'xiaomifeng' | 'wecom' | 'popo',
-      configOverride?: any
-    ) => ipcRenderer.invoke('im:gateway:test', platform, configOverride),
-
-    // Status
-    getStatus: () => ipcRenderer.invoke('im:status:get'),
-    getLocalIp: () => ipcRenderer.invoke('im:getLocalIp') as Promise<string>,
-    // OpenClaw config schema
-    getOpenClawConfigSchema: () => ipcRenderer.invoke('im:openclaw:config-schema'),
-
-
-    // Pairing
-    listPairingRequests: (platform: string) => ipcRenderer.invoke('im:pairing:list', platform),
-    approvePairingCode: (platform: string, code: string) => ipcRenderer.invoke('im:pairing:approve', platform, code),
-    rejectPairingRequest: (platform: string, code: string) => ipcRenderer.invoke('im:pairing:reject', platform, code),
-
-    // Event listeners
-    onStatusChange: (callback: (status: any) => void) => {
-      const handler = (_event: any, status: any) => callback(status);
-      ipcRenderer.on('im:status:change', handler);
-      return () => ipcRenderer.removeListener('im:status:change', handler);
-    },
-    onMessageReceived: (callback: (message: any) => void) => {
-      const handler = (_event: any, message: any) => callback(message);
-      ipcRenderer.on('im:message:received', handler);
-      return () => ipcRenderer.removeListener('im:message:received', handler);
-    },
   },
   scheduledTasks: {
     // Task CRUD

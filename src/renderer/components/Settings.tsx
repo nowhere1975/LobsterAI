@@ -9,7 +9,7 @@ import { decryptSecret, encryptWithPassword, decryptWithPassword, EncryptedPaylo
 import { coworkService } from '../services/cowork';
 import { APP_ID, EXPORT_FORMAT_TYPE, EXPORT_PASSWORD } from '../constants/app';
 import ErrorMessage from './ErrorMessage';
-import { XMarkIcon, Cog6ToothIcon, SignalIcon, CheckCircleIcon, XCircleIcon, CubeIcon, ChatBubbleLeftIcon, EnvelopeIcon, CpuChipIcon, InformationCircleIcon, UserCircleIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon, Cog6ToothIcon, SignalIcon, CheckCircleIcon, XCircleIcon, CubeIcon, EnvelopeIcon, InformationCircleIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
 import PlusCircleIcon from './icons/PlusCircleIcon';
 import TrashIcon from './icons/TrashIcon';
@@ -20,13 +20,10 @@ import { setAvailableModels } from '../store/slices/modelSlice';
 import { RootState } from '../store';
 import ThemedSelect from './ui/ThemedSelect';
 import type {
-  CoworkAgentEngine,
-  OpenClawEngineStatus,
   CoworkUserMemoryEntry,
   CoworkMemoryStats,
 } from '../types/cowork';
-import IMSettings from './im/IMSettings';
-import { imService } from '../services/im';
+
 import EmailSkillConfig from './skills/EmailSkillConfig';
 import { defaultConfig, type AppConfig, getVisibleProviders } from '../config';
 import {
@@ -47,7 +44,7 @@ import {
   CustomProviderIcon,
 } from './icons/providers';
 
-type TabType = 'general'| 'coworkAgentEngine' | 'model' | 'coworkMemory' | 'coworkAgent' | 'shortcuts' | 'im' | 'email' | 'about';
+type TabType = 'general' | 'model' | 'coworkMemory' | 'coworkAgent' | 'shortcuts' | 'email' | 'about';
 
 export type SettingsOpenOptions = {
   initialTab?: TabType;
@@ -366,7 +363,7 @@ const getDefaultActiveProvider = (): ProviderType => {
 
 /** Join workspace directory with a filename using platform-aware separator. */
 const joinWorkspacePath = (dir: string | undefined, filename: string): string => {
-  const base = dir?.trim() || '~/.openclaw/workspace';
+  const base = dir?.trim() || '~/lobsterai/project';
   const sep = window.electron.platform === 'win32' ? '\\' : '/';
   // Normalize: if base already ends with a separator, don't double it
   return base.endsWith(sep) || base.endsWith('/') || base.endsWith('\\')
@@ -532,7 +529,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
 
   const coworkConfig = useSelector((state: RootState) => state.cowork.config);
 
-  const [coworkAgentEngine, setCoworkAgentEngine] = useState<CoworkAgentEngine>(coworkConfig.agentEngine || 'openclaw');
   const [coworkMemoryEnabled, setCoworkMemoryEnabled] = useState<boolean>(coworkConfig.memoryEnabled ?? true);
   const [coworkMemoryLlmJudgeEnabled, setCoworkMemoryLlmJudgeEnabled] = useState<boolean>(coworkConfig.memoryLlmJudgeEnabled ?? false);
   const [coworkMemoryEntries, setCoworkMemoryEntries] = useState<CoworkUserMemoryEntry[]>([]);
@@ -546,14 +542,10 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   const [bootstrapUser, setBootstrapUser] = useState<string>('');
   const [bootstrapSoul, setBootstrapSoul] = useState<string>('');
   const [bootstrapLoaded, setBootstrapLoaded] = useState<boolean>(false);
-  const [openClawEngineStatus, setOpenClawEngineStatus] = useState<OpenClawEngineStatus | null>(null);
-
   useEffect(() => {
-    setCoworkAgentEngine(coworkConfig.agentEngine || 'openclaw');
     setCoworkMemoryEnabled(coworkConfig.memoryEnabled ?? true);
     setCoworkMemoryLlmJudgeEnabled(coworkConfig.memoryLlmJudgeEnabled ?? false);
   }, [
-    coworkConfig.agentEngine,
     coworkConfig.memoryEnabled,
     coworkConfig.memoryLlmJudgeEnabled,
   ]);
@@ -565,22 +557,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     if (updateCheckTimerRef.current != null) {
       window.clearTimeout(updateCheckTimerRef.current);
     }
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void coworkService.getOpenClawEngineStatus().then((status) => {
-      if (!active || !status) return;
-      setOpenClawEngineStatus(status);
-    });
-    const unsubscribe = coworkService.onOpenClawEngineStatus((status) => {
-      if (!active) return;
-      setOpenClawEngineStatus(status);
-    });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
   }, []);
 
   useEffect(() => {
@@ -945,41 +921,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     });
   };
 
-  const hasCoworkConfigChanges = coworkAgentEngine !== coworkConfig.agentEngine
-    || coworkMemoryEnabled !== coworkConfig.memoryEnabled
+  const hasCoworkConfigChanges = coworkMemoryEnabled !== coworkConfig.memoryEnabled
     || coworkMemoryLlmJudgeEnabled !== coworkConfig.memoryLlmJudgeEnabled;
-  const isOpenClawAgentEngine = coworkAgentEngine === 'openclaw';
-
-  const openClawProgressPercent = useMemo(() => {
-    if (typeof openClawEngineStatus?.progressPercent !== 'number' || !Number.isFinite(openClawEngineStatus.progressPercent)) {
-      return null;
-    }
-    return Math.max(0, Math.min(100, Math.round(openClawEngineStatus.progressPercent)));
-  }, [openClawEngineStatus]);
-
-  const resolveOpenClawStatusText = (status: OpenClawEngineStatus | null): string => {
-    if (!status) {
-      return i18nService.t('coworkOpenClawNotInstalledNotice');
-    }
-    if (status.message?.trim()) {
-      return status.message.trim();
-    }
-    switch (status.phase) {
-      case 'not_installed':
-        return i18nService.t('coworkOpenClawNotInstalledNotice');
-      case 'installing':
-        return i18nService.t('coworkOpenClawInstalling');
-      case 'ready':
-        return i18nService.t('coworkOpenClawReadyNotice');
-      case 'starting':
-        return i18nService.t('coworkOpenClawStarting');
-      case 'error':
-        return i18nService.t('coworkOpenClawError');
-      case 'running':
-      default:
-        return i18nService.t('coworkOpenClawRunning');
-    }
-  };
 
   const loadCoworkMemoryData = useCallback(async () => {
     setCoworkMemoryListLoading(true);
@@ -1009,7 +952,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   }, [activeTab, loadCoworkMemoryData]);
 
   /**
-   * Detect OpenClaw default template content and return empty string.
+   * Detect default template content and return empty string.
    * Templates contain YAML frontmatter and specific marker phrases.
    */
   const stripDefaultTemplate = (content: string): string => {
@@ -1209,7 +1152,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
 
       if (hasCoworkConfigChanges) {
         const updated = await coworkService.updateConfig({
-          agentEngine: coworkAgentEngine,
           memoryEnabled: coworkMemoryEnabled,
           memoryLlmJudgeEnabled: coworkMemoryLlmJudgeEnabled,
         });
@@ -1229,11 +1171,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
           throw new Error(i18nService.t('coworkBootstrapSaveFailed'));
         }
       }
-
-      // Sync IM gateway config (regenerate openclaw.json and restart gateway if running).
-      // This is done on every save regardless of activeTab, because the user may have
-      // edited IM config then switched tabs before clicking Save.
-      await imService.saveAndSyncConfig();
 
       didSaveRef.current = true;
       onClose();
@@ -1827,10 +1764,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   // 渲染标签页
   const sidebarTabs: { key: TabType; label: string; icon: React.ReactNode }[] = useMemo(() => [
     { key: 'general',        label: i18nService.t('general'),        icon: <Cog6ToothIcon className="h-5 w-5" /> },
-    { key: 'coworkAgentEngine', label: i18nService.t('coworkAgentEngine'), icon: <CpuChipIcon className="h-5 w-5" /> },
     { key: 'model',          label: i18nService.t('model'),          icon: <CubeIcon className="h-5 w-5" /> },
-    { key: 'im',             label: i18nService.t('imBot'),          icon: <ChatBubbleLeftIcon className="h-5 w-5" /> },
-    { key: 'email',          label: i18nService.t('emailTab'),       icon: <EnvelopeIcon className="h-5 w-5" /> },
+{ key: 'email',          label: i18nService.t('emailTab'),       icon: <EnvelopeIcon className="h-5 w-5" /> },
     { key: 'coworkMemory',   label: i18nService.t('coworkMemoryTitle'), icon: <BrainIcon className="h-5 w-5" /> },
     { key: 'coworkAgent',    label: i18nService.t('coworkAgentTab'),    icon: <UserCircleIcon className="h-5 w-5" /> },
     { key: 'shortcuts',      label: i18nService.t('shortcuts'),      icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5"><rect x="2" y="4" width="20" height="14" rx="2" /><line x1="6" y1="8" x2="8" y2="8" /><line x1="10" y1="8" x2="12" y2="8" /><line x1="14" y1="8" x2="16" y2="8" /><line x1="6" y1="12" x2="8" y2="12" /><line x1="10" y1="12" x2="14" y2="12" /><line x1="16" y1="12" x2="18" y2="12" /><line x1="8" y1="15.5" x2="16" y2="15.5" /></svg> },
@@ -2075,58 +2010,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
 
       case 'email':
         return <EmailSkillConfig />;
-
-      case 'coworkAgentEngine':
-        return (
-          <div className="space-y-6">
-            <div className="space-y-3">
-              <div className="flex items-start gap-3 rounded-xl border px-3 py-2 text-sm dark:border-claude-darkBorder border-claude-border">
-                <input
-                  type="radio"
-                  checked={true}
-                  readOnly
-                  className="mt-1"
-                />
-                <span>
-                  <span className="block font-medium dark:text-claude-darkText text-claude-text">
-                    {i18nService.t('coworkAgentEngineOpenClaw')}
-                  </span>
-                  <span className="block text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
-                    {i18nService.t('coworkAgentEngineOpenClawHint')}
-                  </span>
-                </span>
-              </div>
-            </div>
-            {isOpenClawAgentEngine && (
-              <div className="space-y-3 rounded-xl border px-4 py-4 dark:border-claude-darkBorder border-claude-border">
-                <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
-                  {i18nService.t('coworkOpenClawInstallHint')}
-                </div>
-                <div className={`rounded-xl border px-4 py-3 text-sm ${openClawEngineStatus?.phase === 'error'
-                  ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300'
-                  : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300'}`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      {resolveOpenClawStatusText(openClawEngineStatus)}
-                      {openClawProgressPercent !== null && (
-                        <span className="ml-2 text-xs opacity-80">{openClawProgressPercent}%</span>
-                      )}
-                    </div>
-                  </div>
-                  {openClawProgressPercent !== null && (
-                    <div className="mt-2 h-2 rounded-full bg-black/10 overflow-hidden">
-                      <div
-                        className="h-full bg-claude-accent transition-all"
-                        style={{ width: `${openClawProgressPercent}%` }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        );
 
       case 'coworkMemory':
         return (
@@ -2794,9 +2677,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
             </div>
           </div>
         );
-
-      case 'im':
-        return <IMSettings />;
 
       case 'about':
         return (

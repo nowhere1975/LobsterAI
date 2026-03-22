@@ -24,7 +24,6 @@ import type {
   CoworkUserMemoryEntry,
   CoworkMemoryStats,
   CoworkPermissionResult,
-  OpenClawEngineStatus,
   CoworkStartOptions,
   CoworkContinueOptions,
 } from '../types/cowork';
@@ -32,9 +31,6 @@ import type {
 class CoworkService {
   private streamListenerCleanups: Array<() => void> = [];
   private initialized = false;
-  private openClawStatus: OpenClawEngineStatus | null = null;
-  private openClawStatusListeners = new Set<(status: OpenClawEngineStatus) => void>();
-  private openClawEngineListenerAttached = false;
   private latestLoadSessionsRequestId = 0;
   private latestLoadSessionRequestId = 0;
 
@@ -49,10 +45,6 @@ class CoworkService {
 
     // Set up stream listeners
     this.setupStreamListeners();
-    this.setupOpenClawEngineListeners();
-
-    // Load OpenClaw status
-    await this.loadOpenClawEngineStatus();
 
     this.initialized = true;
   }
@@ -160,29 +152,9 @@ class CoworkService {
     this.streamListenerCleanups.push(sessionsChangedCleanup);
   }
 
-  private setupOpenClawEngineListeners(): void {
-    if (this.openClawEngineListenerAttached) return;
-    const engineApi = window.electron?.openclaw?.engine;
-    if (!engineApi?.onProgress) return;
-
-    const statusCleanup = engineApi.onProgress((status) => {
-      this.notifyOpenClawStatus(status);
-    });
-    this.streamListenerCleanups.push(statusCleanup);
-    this.openClawEngineListenerAttached = true;
-  }
-
-  private notifyOpenClawStatus(status: OpenClawEngineStatus): void {
-    this.openClawStatus = status;
-    this.openClawStatusListeners.forEach((listener) => {
-      listener(status);
-    });
-  }
-
   private cleanupListeners(): void {
     this.streamListenerCleanups.forEach(cleanup => cleanup());
     this.streamListenerCleanups = [];
-    this.openClawEngineListenerAttached = false;
   }
 
   async loadSessions(): Promise<void> {
@@ -205,20 +177,6 @@ class CoworkService {
     }
   }
 
-  async loadOpenClawEngineStatus(): Promise<OpenClawEngineStatus | null> {
-    this.setupOpenClawEngineListeners();
-    const engineApi = window.electron?.openclaw?.engine;
-    if (!engineApi?.getStatus) {
-      return null;
-    }
-    const result = await engineApi.getStatus();
-    if (result?.success && result.status) {
-      this.notifyOpenClawStatus(result.status);
-      return result.status;
-    }
-    return this.openClawStatus;
-  }
-
   async startSession(options: CoworkStartOptions): Promise<CoworkSession | null> {
     const cowork = window.electron?.cowork;
     if (!cowork) {
@@ -235,10 +193,6 @@ class CoworkService {
         store.dispatch(setStreaming(false));
       }
       return result.session;
-    }
-
-    if (result.engineStatus) {
-      this.notifyOpenClawStatus(result.engineStatus);
     }
 
     store.dispatch(setStreaming(false));
@@ -265,12 +219,7 @@ class CoworkService {
     });
     if (!result.success) {
       store.dispatch(setStreaming(false));
-      if (result.engineStatus) {
-        this.notifyOpenClawStatus(result.engineStatus);
-      }
-      if (result.code !== 'ENGINE_NOT_READY') {
-        store.dispatch(updateSessionStatus({ sessionId: options.sessionId, status: 'error' }));
-      }
+      store.dispatch(updateSessionStatus({ sessionId: options.sessionId, status: 'error' }));
       console.error('Failed to continue session:', result.error);
       return false;
     }
@@ -553,60 +502,6 @@ class CoworkService {
     return Boolean(result?.success);
   }
 
-  onOpenClawEngineStatus(callback: (status: OpenClawEngineStatus) => void): () => void {
-    this.setupOpenClawEngineListeners();
-    this.openClawStatusListeners.add(callback);
-    if (this.openClawStatus) {
-      callback(this.openClawStatus);
-    }
-    return () => {
-      this.openClawStatusListeners.delete(callback);
-    };
-  }
-
-  async getOpenClawEngineStatus(): Promise<OpenClawEngineStatus | null> {
-    return this.loadOpenClawEngineStatus();
-  }
-
-  async installOpenClawEngine(): Promise<OpenClawEngineStatus | null> {
-    const engineApi = window.electron?.openclaw?.engine;
-    if (!engineApi?.install) {
-      return null;
-    }
-    const result = await engineApi.install();
-    if (result?.status) {
-      this.notifyOpenClawStatus(result.status);
-      return result.status;
-    }
-    return this.openClawStatus;
-  }
-
-  async retryOpenClawInstall(): Promise<OpenClawEngineStatus | null> {
-    const engineApi = window.electron?.openclaw?.engine;
-    if (!engineApi?.retryInstall) {
-      return null;
-    }
-    const result = await engineApi.retryInstall();
-    if (result?.status) {
-      this.notifyOpenClawStatus(result.status);
-      return result.status;
-    }
-    return this.openClawStatus;
-  }
-
-  async restartOpenClawGateway(): Promise<OpenClawEngineStatus | null> {
-    const engineApi = window.electron?.openclaw?.engine;
-    if (!engineApi?.restartGateway) {
-      return null;
-    }
-    const result = await engineApi.restartGateway();
-    if (result?.status) {
-      this.notifyOpenClawStatus(result.status);
-      return result.status;
-    }
-    return this.openClawStatus;
-  }
-
   async generateSessionTitle(prompt: string | null): Promise<string | null> {
     if (!window.electron?.generateSessionTitle) {
       return null;
@@ -627,7 +522,6 @@ class CoworkService {
 
   destroy(): void {
     this.cleanupListeners();
-    this.openClawStatusListeners.clear();
     this.initialized = false;
   }
 }
