@@ -1492,11 +1492,6 @@ if (!gotTheLock) {
       const router = getCoworkEngineRouter();
       for (const sessionId of sessionIds) {
         try {
-          getIMGatewayManager()?.getIMStore()?.deleteSessionMappingByCoworkSessionId(sessionId);
-        } catch {
-          // IM store may not be initialised yet; safe to ignore.
-        }
-        try {
           router.onSessionDeleted(sessionId);
         } catch {
           // Router may not be initialised yet; safe to ignore.
@@ -1553,10 +1548,9 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:remoteManaged', async (_event, sessionId: string) => {
+  ipcMain.handle('cowork:session:remoteManaged', async (_event, _sessionId: string) => {
     try {
-      const mapping = getIMGatewayManager()?.getIMStore()?.getSessionMappingByCoworkSessionId(sessionId);
-      return { success: true, remoteManaged: !!mapping };
+      return { success: true, remoteManaged: false };
     } catch (error) {
       return {
         success: false,
