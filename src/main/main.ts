@@ -1873,12 +1873,6 @@ if (!gotTheLock) {
 
   ipcMain.handle('scheduledTask:list', async () => {
     try {
-      // If OpenClaw gateway is not connected yet, return empty list immediately
-      // to avoid blocking the renderer init. Tasks will be loaded later via the
-      // onRefresh listener when the gateway becomes available.
-      if (!openClawRuntimeAdapter?.getGatewayClient()) {
-        return { success: true, tasks: [] };
-      }
       const tasks = await getCronJobService().listJobs();
       return { success: true, tasks };
     } catch (error) {
