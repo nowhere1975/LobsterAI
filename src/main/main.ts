@@ -44,7 +44,6 @@ type McpBridgeConfig = {
   secret: string;
   tools: Array<{ name: string; description: string; inputSchema: object }>;
 };
-import { downloadUpdate, installUpdate, cancelActiveDownload } from './libs/appUpdateInstaller';
 import { initLogger, getLogFilePath } from './logger';
 import { getCoworkLogPath } from './libs/coworkLogger';
 import { exportLogsZip } from './libs/logExport';
@@ -2234,34 +2233,6 @@ if (!gotTheLock) {
       return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
-    }
-  });
-
-  // App update download & install
-  ipcMain.handle('appUpdate:download', async (event, url: string) => {
-    try {
-      const filePath = await downloadUpdate(url, (progress) => {
-        if (!event.sender.isDestroyed()) {
-          event.sender.send('appUpdate:downloadProgress', progress);
-        }
-      });
-      return { success: true, filePath };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Download failed' };
-    }
-  });
-
-  ipcMain.handle('appUpdate:cancelDownload', async () => {
-    const cancelled = cancelActiveDownload();
-    return { success: cancelled };
-  });
-
-  ipcMain.handle('appUpdate:install', async (_event, filePath: string) => {
-    try {
-      await installUpdate(filePath);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Installation failed' };
     }
   });
 

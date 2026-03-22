@@ -100,13 +100,6 @@ interface CoworkApiConfig {
   apiType?: 'anthropic' | 'openai';
 }
 
-interface AppUpdateDownloadProgress {
-  received: number;
-  total: number | undefined;
-  percent: number | undefined;
-  speed: number | undefined;
-}
-
 interface WindowState {
   isMaximized: boolean;
   isFullscreen: boolean;
@@ -333,12 +326,6 @@ interface IElectronAPI {
   appInfo: {
     getVersion: () => Promise<string>;
     getSystemLocale: () => Promise<string>;
-  };
-  appUpdate: {
-    download: (url: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
-    cancelDownload: () => Promise<{ success: boolean }>;
-    install: (filePath: string) => Promise<{ success: boolean; error?: string }>;
-    onDownloadProgress: (callback: (data: AppUpdateDownloadProgress) => void) => () => void;
   };
   log: {
     getPath: () => Promise<string>;

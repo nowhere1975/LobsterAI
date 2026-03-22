@@ -1,3 +1,3 @@
-export const APP_NAME = 'LobsterAI';
-export const APP_ID = 'lobsterai';
+export const APP_NAME = 'UdiskAI';
+export const APP_ID = 'udiskai';
 export const DB_FILENAME = 'lobsterai.sqlite';
