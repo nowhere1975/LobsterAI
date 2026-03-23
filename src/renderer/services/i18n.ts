@@ -377,7 +377,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkQuestionWizardSelectAtLeastOne: '请至少选择一个选项',
     coworkQuestionWizardAnswerRequired: '请选择或输入答案',
     coworkWelcome: 'UdiskAI',
-    coworkDescription: '你的随声办公AI助手',
+    coworkDescription: '你的随身AI办公助手',
     coworkNewSession: '新会话',
     coworkContinuePlaceholder: '继续对话...',
     coworkStartingSession: '正在启动会话...',
