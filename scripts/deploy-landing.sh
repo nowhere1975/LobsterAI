@@ -304,7 +304,7 @@ cat > "$WEBROOT/index.html" << 'HTMLEOF'
     <div class="step">
       <div class="step-num">2</div>
       <div class="step-title">填入 API Key</div>
-      <p class="step-desc">打开设置页面，填入你的 Anthropic Claude API Key，一次配置永久生效。</p>
+      <p class="step-desc">打开设置页面，填入你的大模型 API Key，多个主流大模型供应商可选。</p>
     </div>
     <div class="step">
       <div class="step-num">3</div>
