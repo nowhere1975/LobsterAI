@@ -17,6 +17,10 @@
   <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React">
 </p>
 
+<p align="center">
+  <img src="scripts/web-assets/screenshot.png" alt="UdiskAI 界面截图" width="800">
+</p>
+
 ---
 
 本项目是 [netease-youdao/LobsterAI](https://github.com/netease-youdao/LobsterAI) 的便携版 Fork，专为 **Windows 办公场景**优化：解压即用，无需安装，不写注册表，U 盘可带走。
@@ -79,22 +83,20 @@ UdiskAI/
 
 在设置页面填入对应 API Key 即可使用：
 
-- **Anthropic Claude**（推荐，Cowork 模式必选）
 - MiniMax
 - 月之暗面 Kimi
 - 阿里云通义千问
 - 智谱 GLM
 - 火山引擎
+- Anthropic Claude
 - OpenAI
 - Gemini
 - OpenRouter
 - 及其他 OpenAI 兼容接口
 
-> Cowork 智能体模式（文件操作、运行命令等）需要 Anthropic Claude API Key。
-
 ## Cowork 智能体模式
 
-Cowork 是核心功能，基于 Claude Agent SDK，可自主完成复杂任务：
+Cowork 是核心功能，可自主完成复杂任务：
 
 - 读写本地文件，生成 Word / Excel / PPT / PDF
 - 执行终端命令，运行 Python / Node.js 脚本
