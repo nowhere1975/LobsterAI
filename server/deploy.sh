@@ -58,7 +58,7 @@ systemctl status "$SERVICE_NAME" --no-pager
 echo ""
 echo "✅ 服务端部署完成！"
 echo "   服务运行在 http://127.0.0.1:3000"
-echo "   测试：curl http://127.0.0.1:4321/credits?deviceId=test123"
+echo "   测试：curl http://127.0.0.1:8888/credits?deviceId=test123"
 echo ""
 echo "接下来："
 echo "  1. 编辑 $SERVER_DIR/.env，填入 DEEPSEEK_API_KEY"
