@@ -184,6 +184,55 @@ cat > "$WEBROOT/index.html" << 'HTMLEOF'
     .feature-name { font-size: 1.05rem; font-weight: 700; margin-bottom: 8px; }
     .feature-desc { font-size: 0.9rem; color: var(--text-secondary); line-height: 1.65; }
 
+    /* SKILLS */
+    .skills { padding: 72px 24px; background: var(--bg-gray); }
+    .skills-grid {
+      max-width: 960px; margin: 0 auto;
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    }
+    .skill-card {
+      background: var(--white); border: 1px solid var(--border);
+      border-radius: 14px; padding: 22px 20px;
+      display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+      transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
+    }
+    .skill-card:hover {
+      box-shadow: 0 6px 24px rgba(99,102,241,0.1);
+      border-color: #c7d2fe; transform: translateY(-2px);
+    }
+    .skill-icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .skill-icon svg { width: 20px; height: 20px; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+    .skill-name { font-size: 0.9rem; font-weight: 700; }
+    .skill-desc { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.55; }
+
+    /* CHANGELOG */
+    .changelog { padding: 72px 24px; background: var(--white); }
+    .changelog-inner { max-width: 720px; margin: 0 auto; }
+    .changelog-entry { margin-bottom: 32px; }
+    .changelog-version {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 0.8rem; font-weight: 700; letter-spacing: 0.06em;
+      color: var(--indigo); background: var(--indigo-light);
+      padding: 4px 12px; border-radius: 100px; margin-bottom: 14px;
+    }
+    .changelog-version .badge-new {
+      background: var(--indigo); color: #fff;
+      font-size: 0.65rem; padding: 1px 7px; border-radius: 100px; letter-spacing: 0.05em;
+    }
+    .changelog-items { display: flex; flex-direction: column; gap: 8px; }
+    .changelog-item {
+      display: flex; gap: 10px; align-items: flex-start;
+      font-size: 0.875rem; color: var(--text-secondary); line-height: 1.6;
+    }
+    .changelog-item .dot {
+      width: 6px; height: 6px; background: var(--indigo); border-radius: 50%;
+      flex-shrink: 0; margin-top: 8px;
+    }
+
     /* HOW TO */
     .howto { padding: 88px 24px; background: var(--bg-gray); }
     .steps-row {
@@ -229,6 +278,7 @@ cat > "$WEBROOT/index.html" << 'HTMLEOF'
     }
     @media (max-width: 768px) {
       .cases-grid { grid-template-columns: 1fr; max-width: 480px; }
+      .skills-grid { grid-template-columns: repeat(2, 1fr); }
       .features-grid { grid-template-columns: 1fr; max-width: 480px; }
       .steps-row { grid-template-columns: 1fr; gap: 40px; }
       .steps-row::before { display: none; }
@@ -250,7 +300,9 @@ cat > "$WEBROOT/index.html" << 'HTMLEOF'
     </a>
     <div class="nav-links">
       <a href="#cases">案例</a>
+      <a href="#skills">技能</a>
       <a href="#features">功能</a>
+      <a href="#changelog">更新</a>
       <a href="#howto">使用说明</a>
       <a class="nav-github" href="https://github.com/nowhere1975/UdiskAI" target="_blank" rel="noopener">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -317,6 +369,100 @@ cat > "$WEBROOT/index.html" << 'HTMLEOF'
         <div class="case-title">读取文件自动写报告</div>
         <p class="case-desc">指定工作文件夹，AI 自动读取材料，生成完整的季度工作总结 Word 文档。</p>
         <div class="case-prompt">我的工作文件在 C 盘工作文件夹，按里面的内容帮我写季度工作总结</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="skills" id="skills">
+  <div class="section-header">
+    <div class="section-label">内置技能</div>
+    <h2 class="section-title">开箱即用的办公能力</h2>
+  </div>
+  <div class="skills-grid">
+    <div class="skill-card">
+      <div class="skill-icon" style="background:#e0e7ff">
+        <svg viewBox="0 0 24 24" stroke="#6366f1"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      </div>
+      <div class="skill-name">中文文档生成</div>
+      <p class="skill-desc">正式公文（GB/T 9704）、工作总结、项目方案，直接输出 .docx</p>
+    </div>
+    <div class="skill-card">
+      <div class="skill-icon" style="background:#dcfce7">
+        <svg viewBox="0 0 24 24" stroke="#16a34a"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>
+      </div>
+      <div class="skill-name">Excel 数据分析</div>
+      <p class="skill-desc">读取表格、自动统计汇总、图表生成，结果保存为新文件</p>
+    </div>
+    <div class="skill-card">
+      <div class="skill-icon" style="background:#fef9c3">
+        <svg viewBox="0 0 24 24" stroke="#ca8a04"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="m9 21 3-9 3 9"/></svg>
+      </div>
+      <div class="skill-name">PPT 制作</div>
+      <p class="skill-desc">工作汇报、项目介绍、培训材料，AI 全自动生成幻灯片</p>
+    </div>
+    <div class="skill-card">
+      <div class="skill-icon" style="background:#fee2e2">
+        <svg viewBox="0 0 24 24" stroke="#dc2626"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <div class="skill-name">PDF 处理</div>
+      <p class="skill-desc">读取、提取文本、合并拆分，支持将文档导出为 PDF</p>
+    </div>
+    <div class="skill-card">
+      <div class="skill-icon" style="background:#e0f2fe">
+        <svg viewBox="0 0 24 24" stroke="#0284c7"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
+      <div class="skill-name">网页搜索</div>
+      <p class="skill-desc">实时检索多个信源，获取最新信息，整合生成结构化报告</p>
+    </div>
+    <div class="skill-card">
+      <div class="skill-icon" style="background:#f3e8ff">
+        <svg viewBox="0 0 24 24" stroke="#9333ea"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      </div>
+      <div class="skill-name">邮件收发</div>
+      <p class="skill-desc">读取收件箱、起草并发送邮件，支持主流邮箱协议</p>
+    </div>
+    <div class="skill-card">
+      <div class="skill-icon" style="background:#cffafe">
+        <svg viewBox="0 0 24 24" stroke="#0891b2"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></svg>
+      </div>
+      <div class="skill-name">朋友圈卡片</div>
+      <p class="skill-desc">输入文字生成精美图片，长图、信息图、九宫格等 6 种风格</p>
+    </div>
+    <div class="skill-card">
+      <div class="skill-icon" style="background:#fce7f3">
+        <svg viewBox="0 0 24 24" stroke="#db2777"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </div>
+      <div class="skill-name">Word 编辑</div>
+      <p class="skill-desc">打开并修改现有 Word 文档，重新排版或按模板套用格式</p>
+    </div>
+  </div>
+</section>
+
+<section class="changelog" id="changelog">
+  <div class="section-header">
+    <div class="section-label">更新日志</div>
+    <h2 class="section-title">持续迭代中</h2>
+  </div>
+  <div class="changelog-inner">
+    <div class="changelog-entry">
+      <div class="changelog-version">
+        v2026.3.24 <span class="badge-new">最新</span>
+      </div>
+      <div class="changelog-items">
+        <div class="changelog-item"><div class="dot"></div><span><strong>朋友圈卡片技能</strong>：输入文字生成精美图片，支持长图、信息图、九宫格、手绘笔记、白板框图、漫画格 6 种风格，调用系统 Edge 渲染，无需额外下载浏览器</span></div>
+        <div class="changelog-item"><div class="dot"></div><span><strong>首页快捷按钮</strong>：新增「发朋友圈」和「PPT 制作」两个快捷入口，各含 4 个子场景模板</span></div>
+        <div class="changelog-item"><div class="dot"></div><span>去除 <code style="font-size:0.8em;background:#f3f4f6;padding:1px 5px;border-radius:4px">启动.bat</code>，直接双击 UdiskAI.exe 即可运行，程序自动识别便携模式</span></div>
+        <div class="changelog-item"><div class="dot"></div><span>修复快捷按钮、技能删除、MiniMax API 连接等多项 Bug</span></div>
+      </div>
+    </div>
+    <div class="changelog-entry">
+      <div class="changelog-version">v2026.3.22 — 首个正式版本</div>
+      <div class="changelog-items">
+        <div class="changelog-item"><div class="dot"></div><span><strong>便携模式</strong>：解压即用，数据全存 data/ 目录，支持 U 盘随身携带</span></div>
+        <div class="changelog-item"><div class="dot"></div><span>内置 Word、Excel、PPT、PDF、网页搜索、邮件等办公技能</span></div>
+        <div class="changelog-item"><div class="dot"></div><span>技能安全扫描：从技能市场安装第三方技能时自动审查</span></div>
+        <div class="changelog-item"><div class="dot"></div><span>项目由 LobsterAI 重命名为 UdiskAI，移除非便携功能，精简包体积</span></div>
       </div>
     </div>
   </div>
