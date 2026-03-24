@@ -652,6 +652,26 @@ const translations: Record<LanguageType, Record<string, string>> = {
     useSystemProxy: '使用系统代理',
     useSystemProxyDescription: '开启后网络请求将跟随系统代理（保存后生效）',
 
+    // 内置额度云模式
+    cloudMode: '内置额度模式',
+    cloudModeDescription: '无需自备 API Key，使用 UdiskAI 内置额度与 DeepSeek 对话',
+    cloudModeEnable: '启用内置额度',
+    cloudModeDisable: '切换为自备 Key 模式',
+    cloudCredits: '剩余额度',
+    cloudCreditsUnit: ' tokens',
+    cloudCreditsEstimate: '约可对话',
+    cloudCreditsEstimateUnit: ' 次',
+    cloudCreditsInsufficient: '额度已用完，充值后继续使用',
+    cloudRecharge: '立即充值',
+    cloudRechargeTitle: '选择充值套餐',
+    cloudRechargePkg10: '¥10 → 1000万 tokens',
+    cloudRechargePkg30: '¥30 → 3500万 tokens',
+    cloudRechargePkg100: '¥100 → 1.3亿 tokens',
+    cloudRechargeWaiting: '等待支付完成...',
+    cloudRechargeSuccess: '充值成功！',
+    cloudRechargeSuccessDesc: '额度已到账',
+    cloudDeviceId: '设备 ID',
+
     // 定时任务
     scheduledTasks: '定时任务',
     scheduledTasksTitle: '定时任务',
@@ -1460,6 +1480,26 @@ const translations: Record<LanguageType, Record<string, string>> = {
     autoLaunchDescription: 'Automatically start the app when you log in',
     useSystemProxy: 'Use System Proxy',
     useSystemProxyDescription: 'When enabled, network requests follow system proxy settings (applies after Save)',
+
+    // Built-in credits cloud mode
+    cloudMode: 'Built-in Credits',
+    cloudModeDescription: 'Use UdiskAI built-in credits with DeepSeek — no API Key needed',
+    cloudModeEnable: 'Enable Built-in Credits',
+    cloudModeDisable: 'Switch to Self-Key Mode',
+    cloudCredits: 'Remaining Credits',
+    cloudCreditsUnit: ' tokens',
+    cloudCreditsEstimate: 'Est. chats',
+    cloudCreditsEstimateUnit: '',
+    cloudCreditsInsufficient: 'Credits exhausted. Please recharge to continue.',
+    cloudRecharge: 'Recharge',
+    cloudRechargeTitle: 'Select Package',
+    cloudRechargePkg10: '¥10 → 10M tokens',
+    cloudRechargePkg30: '¥30 → 35M tokens',
+    cloudRechargePkg100: '¥100 → 130M tokens',
+    cloudRechargeWaiting: 'Waiting for payment...',
+    cloudRechargeSuccess: 'Recharge successful!',
+    cloudRechargeSuccessDesc: 'Credits added to your account',
+    cloudDeviceId: 'Device ID',
 
     // Scheduled Tasks
     scheduledTasks: 'Scheduled Tasks',

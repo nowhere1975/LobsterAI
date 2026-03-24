@@ -1,5 +1,6 @@
 import { store } from '../store';
 import { configService } from './config';
+import { cloudService, CloudCreditsError } from './cloudService';
 import { ChatMessagePayload, ChatUserMessageInput, ImageAttachment } from '../types/chat';
 
 const ZHIPU_CODING_PLAN_OPENAI_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4';
@@ -373,6 +374,30 @@ class ApiService {
     onProgress?: (content: string, reasoning?: string) => void,
     history: ChatMessagePayload[] = []
   ): Promise<{ content: string; reasoning?: string }> {
+    // ── 内置额度云模式 ──────────────────────────────────────────────────────
+    if (cloudService.isEnabled()) {
+      const userMessage: ChatUserMessageInput = typeof message === 'string'
+        ? { content: message }
+        : { content: message.content || '', images: message.images };
+
+      const systemMsg = history.find(m => m.role === 'system');
+      try {
+        return await cloudService.chat(
+          userMessage,
+          (content) => onProgress?.(content),
+          history.filter(m => m.role !== 'system'),
+          'deepseek-chat',
+          systemMsg?.content,
+        );
+      } catch (err) {
+        if (err instanceof CloudCreditsError) {
+          throw new ApiError(err.message, 402);
+        }
+        throw err;
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     if (!this.config) {
       throw new ApiError('API configuration not set. Please configure your API settings in the settings menu.');
     }

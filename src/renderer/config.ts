@@ -225,6 +225,14 @@ export interface AppConfig {
     settings: string;
     [key: string]: string | undefined;
   };
+  // 内置额度云模式
+  cloud?: {
+    enabled: boolean;       // 是否启用内置额度模式
+    deviceId: string;       // 随 data/ 目录生成的唯一 ID，不绑定机器
+    credits: number;        // 本地缓存的余额
+    lastSyncAt: number;     // 上次同步时间戳
+    serverUrl: string;      // 服务端地址
+  };
 }
 
 // 默认配置
@@ -410,7 +418,14 @@ export const defaultConfig: AppConfig = {
     newChat: 'Ctrl+N',
     search: 'Ctrl+F',
     settings: 'Ctrl+,',
-  }
+  },
+  cloud: {
+    enabled: false,
+    deviceId: '',
+    credits: 0,
+    lastSyncAt: 0,
+    serverUrl: 'https://udiskai.top/api',
+  },
 };
 
 // 配置存储键

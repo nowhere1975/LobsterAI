@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { configService } from '../services/config';
+import { cloudService } from '../services/cloudService';
 import { apiService } from '../services/api';
 import { themeService } from '../services/theme';
 import { i18nService, LanguageType } from '../services/i18n';
@@ -373,6 +374,15 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [language, setLanguage] = useState<LanguageType>('zh');
   const [useSystemProxy, setUseSystemProxy] = useState(false);
+  // 内置额度云模式
+  const [cloudEnabled, setCloudEnabled] = useState(false);
+  const [cloudCredits, setCloudCredits] = useState(0);
+  const [cloudDeviceId, setCloudDeviceId] = useState('');
+  const [isTogglingCloud, setIsTogglingCloud] = useState(false);
+  const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [rechargeStep, setRechargeStep] = useState<'select' | 'waiting' | 'success'>('select');
+  const [rechargeOrderId, setRechargeOrderId] = useState('');
+  const [rechargePollTimer, setRechargePollTimer] = useState<ReturnType<typeof setInterval> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(notice ?? null);
@@ -484,6 +494,10 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
       setTheme(config.theme);
       setLanguage(config.language);
       setUseSystemProxy(config.useSystemProxy ?? false);
+      const cloud = config.cloud;
+      setCloudEnabled(cloud?.enabled ?? false);
+      setCloudCredits(cloud?.credits ?? 0);
+      setCloudDeviceId(cloud?.deviceId ?? '');
       const savedTestMode = config.app?.testMode ?? false;
       setTestMode(savedTestMode);
       if (savedTestMode) setTestModeUnlocked(true);
@@ -1744,6 +1758,163 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
                 </button>
               </label>
             </div>
+
+            {/* Cloud Credits Section */}
+            <div className="rounded-xl border dark:border-claude-darkBorder border-claude-border p-4 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-medium dark:text-claude-darkText text-claude-text">
+                    {i18nService.t('cloudMode')}
+                  </h4>
+                  <p className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                    {i18nService.t('cloudModeDescription')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={cloudEnabled}
+                  disabled={isTogglingCloud}
+                  onClick={async () => {
+                    setIsTogglingCloud(true);
+                    try {
+                      if (cloudEnabled) {
+                        await cloudService.disable();
+                        setCloudEnabled(false);
+                      } else {
+                        await cloudService.enable();
+                        setCloudEnabled(true);
+                        const cfg = configService.getConfig().cloud;
+                        setCloudCredits(cfg?.credits ?? 0);
+                        setCloudDeviceId(cfg?.deviceId ?? '');
+                      }
+                    } finally {
+                      setIsTogglingCloud(false);
+                    }
+                  }}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                    cloudEnabled ? 'bg-claude-accent' : 'bg-gray-300 dark:bg-gray-600'
+                  } ${isTogglingCloud ? 'opacity-50 cursor-wait' : ''}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cloudEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+
+              {cloudEnabled && (
+                <div className="space-y-3">
+                  {/* Credits display */}
+                  <div className="rounded-lg bg-gray-50 dark:bg-gray-800 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary mb-0.5">
+                        {i18nService.t('cloudCredits')}
+                      </div>
+                      <div className="text-sm font-semibold dark:text-claude-darkText text-claude-text">
+                        {(cloudCredits / 10000).toFixed(1)}万{i18nService.t('cloudCreditsUnit')}
+                      </div>
+                      <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                        {i18nService.t('cloudCreditsEstimate')} {cloudService.estimateChats(cloudCredits)}{i18nService.t('cloudCreditsEstimateUnit')}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setRechargeStep('select'); setShowRechargeModal(true); }}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-claude-accent text-white hover:opacity-90 transition-opacity"
+                    >
+                      {i18nService.t('cloudRecharge')}
+                    </button>
+                  </div>
+
+                  {/* Device ID */}
+                  {cloudDeviceId && (
+                    <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                      {i18nService.t('cloudDeviceId')}：<span className="font-mono">{cloudDeviceId.slice(0, 16)}…</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Recharge Modal */}
+            {showRechargeModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => {
+                if (rechargeStep !== 'waiting') { setShowRechargeModal(false); if (rechargePollTimer) clearInterval(rechargePollTimer); }
+              }}>
+                <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl p-6 w-80 space-y-4" onClick={e => e.stopPropagation()}>
+                  <h3 className="text-base font-semibold dark:text-claude-darkText text-claude-text">
+                    {rechargeStep === 'success' ? i18nService.t('cloudRechargeSuccess') : i18nService.t('cloudRechargeTitle')}
+                  </h3>
+
+                  {rechargeStep === 'select' && (
+                    <div className="space-y-2">
+                      {([
+                        { id: 'pkg_10', label: i18nService.t('cloudRechargePkg10') },
+                        { id: 'pkg_30', label: i18nService.t('cloudRechargePkg30') },
+                        { id: 'pkg_100', label: i18nService.t('cloudRechargePkg100') },
+                      ] as const).map(pkg => (
+                        <button
+                          key={pkg.id}
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const order = await cloudService.createPayOrder(pkg.id);
+                              setRechargeOrderId(order.orderId);
+                              window.electron.shell.openExternal(order.payUrl);
+                              setRechargeStep('waiting');
+                              // Poll every 3s, max 10min
+                              let attempts = 0;
+                              const timer = setInterval(async () => {
+                                attempts++;
+                                if (attempts > 200) { clearInterval(timer); setShowRechargeModal(false); return; }
+                                try {
+                                  const status = await cloudService.pollPayStatus(order.orderId);
+                                  if (status === 'paid') {
+                                    clearInterval(timer);
+                                    const newCredits = configService.getConfig().cloud?.credits ?? 0;
+                                    setCloudCredits(newCredits);
+                                    setRechargeStep('success');
+                                  }
+                                } catch { /* retry */ }
+                              }, 3000);
+                              setRechargePollTimer(timer);
+                            } catch (err: any) {
+                              console.error('[recharge] failed:', err);
+                            }
+                          }}
+                          className="w-full text-left px-4 py-3 rounded-xl border dark:border-claude-darkBorder border-claude-border hover:border-claude-accent dark:hover:border-claude-accent transition-colors text-sm dark:text-claude-darkText text-claude-text"
+                        >
+                          {pkg.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {rechargeStep === 'waiting' && (
+                    <div className="text-center space-y-3 py-2">
+                      <div className="text-2xl">⏳</div>
+                      <p className="text-sm dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                        {i18nService.t('cloudRechargeWaiting')}
+                      </p>
+                    </div>
+                  )}
+
+                  {rechargeStep === 'success' && (
+                    <div className="text-center space-y-3 py-2">
+                      <div className="text-3xl">🎉</div>
+                      <p className="text-sm dark:text-claude-darkTextSecondary text-claude-textSecondary">
+                        {i18nService.t('cloudRechargeSuccessDesc')}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowRechargeModal(false)}
+                        className="px-4 py-2 text-sm font-medium rounded-lg bg-claude-accent text-white hover:opacity-90"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Appearance Section */}
             <div>
