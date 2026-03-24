@@ -17,6 +17,12 @@ async function main() {
     process.exit(1);
   }
 
+  // Use bundled Chromium if available (portable builds pre-install it here)
+  const localBrowsersPath = path.join(__dirname, '..', 'playwright-browsers');
+  if (fs.existsSync(localBrowsersPath)) {
+    process.env.PLAYWRIGHT_BROWSERS_PATH = localBrowsersPath;
+  }
+
   // Look for playwright in skill-local node_modules first, then global
   let chromium;
   const localPlaywright = path.join(__dirname, '..', 'node_modules', 'playwright');
