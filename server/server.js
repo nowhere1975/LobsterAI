@@ -85,7 +85,6 @@ function hupijiaoSign(params, secret) {
     .filter(k => k !== 'hash' && params[k] !== '' && params[k] !== undefined)
     .sort();
   const str = sorted.map(k => `${k}=${params[k]}`).join('&') + secret;
-  console.debug('[pay/sign]', str);
   return md5(str); // lowercase per xunhupay spec
 }
 
@@ -113,7 +112,6 @@ setInterval(() => {
 function hupijiaoRequest(params) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(params);
-    console.debug('[pay] request body:', body);
     const url = new URL('https://api.xunhupay.com/payment/do.html');
     const options = {
       hostname: url.hostname,
