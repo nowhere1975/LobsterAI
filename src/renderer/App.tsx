@@ -138,8 +138,9 @@ const App: React.FC = () => {
           dispatch(setSelectedModel(preferredModel));
         }
 
-        // 检测是否需要首次配置向导（无任何可用 provider 配置）
-        const needsSetup = !config.api.key &&
+        // 检测是否需要首次配置向导（未开启云额度 且 无任何可用 provider 配置）
+        const needsSetup = !config.cloud?.enabled &&
+          !config.api.key &&
           (!config.providers || Object.values(config.providers).every(
             (p) => !p.enabled || !p.apiKey
           ));

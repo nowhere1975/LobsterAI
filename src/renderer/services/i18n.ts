@@ -652,6 +652,19 @@ const translations: Record<LanguageType, Record<string, string>> = {
     useSystemProxy: '使用系统代理',
     useSystemProxyDescription: '开启后网络请求将跟随系统代理（保存后生效）',
 
+    // 新手引导
+    onboardingClaimTitle: '领取首次登录奖励',
+    onboardingClaimDesc: '200万 tokens · 约可支持 400 次对话',
+    onboardingClaimBtn: '领取奖励',
+    onboardingClaiming: '领取中...',
+    onboardingClaimSuccess: '领取成功！',
+    onboardingCreditsTitle: '大模型对话额度管理',
+    onboardingOwnKey: '我有自己的 API Key',
+    onboardingSkip: '稍后再说',
+    onboardingBack: '返回',
+    onboardingFinish: '完成配置',
+    onboardingSaving: '保存中...',
+
     // 内置额度云模式
     cloudMode: '内置额度模式',
     cloudModeDescription: '无需自备 API Key，使用 UdiskAI 内置额度与 DeepSeek 对话',
@@ -1480,6 +1493,19 @@ const translations: Record<LanguageType, Record<string, string>> = {
     autoLaunchDescription: 'Automatically start the app when you log in',
     useSystemProxy: 'Use System Proxy',
     useSystemProxyDescription: 'When enabled, network requests follow system proxy settings (applies after Save)',
+
+    // Onboarding
+    onboardingClaimTitle: 'Claim Your First-Login Reward',
+    onboardingClaimDesc: '2M tokens · ~400 conversations',
+    onboardingClaimBtn: 'Claim Reward',
+    onboardingClaiming: 'Claiming...',
+    onboardingClaimSuccess: 'Claimed!',
+    onboardingCreditsTitle: 'Credits Management',
+    onboardingOwnKey: 'I have my own API Key',
+    onboardingSkip: 'Skip for now',
+    onboardingBack: 'Back',
+    onboardingFinish: 'Finish Setup',
+    onboardingSaving: 'Saving...',
 
     // Built-in credits cloud mode
     cloudMode: 'Built-in Credits',

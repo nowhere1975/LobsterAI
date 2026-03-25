@@ -1,9 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import { i18nService } from '../services/i18n';
 import { configService } from '../services/config';
+import { cloudService } from '../services/cloudService';
 import { AppConfig } from '../config';
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/20/solid';
-import { ChevronRightIcon } from '@heroicons/react/24/outline';
+import { ChevronRightIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 
 interface Provider {
   key: string;
@@ -63,30 +64,38 @@ const PROVIDERS: Provider[] = [
   },
 ];
 
-type Step = 'welcome' | 'provider' | 'apikey';
-
 interface SetupWizardProps {
   onComplete: () => void;
 }
 
 const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
-  const [step, setStep] = useState<Step>('welcome');
+  const t = useCallback((key: string) => i18nService.t(key), []);
+
+  // 云额度状态
+  const [claiming, setClaiming] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+
+  // API Key 折叠区状态
+  const [keyExpanded, setKeyExpanded] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [keyError, setKeyError] = useState('');
 
-  const t = useCallback((key: string) => i18nService.t(key), []);
-
-  const handleSelectProvider = useCallback((p: Provider) => {
-    setSelectedProvider(p);
-    setApiKey('');
-    setKeyError('');
-    setStep('apikey');
+  // 领取首次登录奖励
+  const handleClaim = useCallback(async () => {
+    setClaiming(true);
+    try {
+      await cloudService.enable();
+      setClaimed(true);
+    } finally {
+      setClaiming(false);
+    }
   }, []);
 
-  const handleFinish = useCallback(async () => {
+  // 保存自带 API Key
+  const handleSaveKey = useCallback(async () => {
     if (!selectedProvider) return;
     if (!apiKey.trim()) {
       setKeyError(t('setupWizardApiKeyEmpty'));
@@ -94,12 +103,9 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
     }
     setSaving(true);
     setKeyError('');
-
     try {
       const config = configService.getConfig();
       const providers = { ...(config.providers ?? {}) };
-
-      // Enable the selected provider with the entered key
       providers[selectedProvider.key] = {
         ...(providers[selectedProvider.key] ?? {}),
         enabled: true,
@@ -110,7 +116,6 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
           { id: selectedProvider.defaultModel, name: selectedProvider.defaultModelName },
         ],
       };
-
       await configService.updateConfig({
         providers: providers as AppConfig['providers'],
         model: {
@@ -119,7 +124,6 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
           defaultModelProvider: selectedProvider.key,
         },
       });
-
       onComplete();
     } finally {
       setSaving(false);
@@ -134,144 +138,158 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="relative w-full max-w-md mx-4 rounded-2xl shadow-2xl dark:bg-claude-darkSurface bg-white overflow-hidden">
 
-        {/* Progress dots */}
-        <div className="flex justify-center gap-2 pt-6 pb-2">
-          {(['welcome', 'provider', 'apikey'] as Step[]).map((s) => (
-            <div
-              key={s}
-              className={`h-1.5 rounded-full transition-all duration-300 ${
-                s === step
-                  ? 'w-6 bg-claude-accent'
-                  : step === 'apikey' && s === 'provider'
-                    ? 'w-1.5 bg-claude-accent/50'
-                    : step === 'provider' && s === 'welcome'
-                      ? 'w-1.5 bg-claude-accent/50'
-                      : 'w-1.5 dark:bg-claude-darkBorder bg-gray-200'
-              }`}
-            />
-          ))}
+        {/* Logo header */}
+        <div className="flex flex-col items-center pt-8 pb-4 px-8">
+          <img src="/logo.png" alt="UdiskAI" className="w-14 h-14 rounded-2xl mb-3 shadow-md" />
+          <h1 className="text-xl font-bold dark:text-claude-darkText text-claude-text">UdiskAI</h1>
+          <p className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted mt-1">你的随身 AI 办公助手</p>
         </div>
 
-        {/* ── Welcome ──────────────────────────────────────── */}
-        {step === 'welcome' && (
-          <div className="flex flex-col items-center px-8 pb-8 pt-4 text-center">
-            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-claude-accent to-claude-accentHover flex items-center justify-center shadow-glow-accent mb-5">
-              <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                  d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
-              </svg>
-            </div>
-            <h1 className="text-2xl font-bold dark:text-claude-darkText text-claude-text mb-3">
-              {t('setupWizardWelcomeTitle')}
-            </h1>
-            <p className="text-sm dark:text-claude-darkTextMuted text-claude-textMuted mb-8 leading-relaxed">
-              {t('setupWizardWelcomeDesc')}
-            </p>
-            <button
-              onClick={() => setStep('provider')}
-              className="w-full py-3 rounded-xl bg-claude-accent hover:bg-claude-accentHover text-white font-medium transition-colors shadow-md"
-            >
-              {t('setupWizardWelcomeStart')}
-            </button>
-            <button
-              onClick={onComplete}
-              className="mt-3 text-sm dark:text-claude-darkTextMuted text-claude-textMuted hover:underline"
-            >
-              {t('setupWizardSkip')}
-            </button>
-          </div>
-        )}
+        <div className="px-6 pb-6 space-y-3">
 
-        {/* ── Provider ─────────────────────────────────────── */}
-        {step === 'provider' && (
-          <div className="px-6 pb-8 pt-2">
-            <h2 className="text-xl font-bold dark:text-claude-darkText text-claude-text mb-1">
-              {t('setupWizardProviderTitle')}
-            </h2>
-            <p className="text-sm dark:text-claude-darkTextMuted text-claude-textMuted mb-5">
-              {t('setupWizardProviderDesc')}
-            </p>
-            <div className="space-y-2">
-              {PROVIDERS.map((p) => (
-                <button
-                  key={p.key}
-                  onClick={() => handleSelectProvider(p)}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-xl border dark:border-claude-darkBorder border-gray-200 dark:bg-claude-darkBg bg-gray-50 hover:border-claude-accent dark:hover:border-claude-accent hover:bg-claude-accent/5 transition-all text-left group"
-                >
-                  <span className="font-medium dark:text-claude-darkText text-claude-text text-sm">
-                    {p.label}
+          {/* ── 首次登录奖励 / 额度管理 ── */}
+          <div className="rounded-xl border dark:border-claude-darkBorder border-gray-200 overflow-hidden">
+            <div className="px-4 py-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-semibold dark:text-claude-darkText text-claude-text">
+                  {claimed ? t('onboardingCreditsTitle') : t('onboardingClaimTitle')}
+                </span>
+                {claimed && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                    已领取
                   </span>
-                  <ChevronRightIcon className="h-4 w-4 dark:text-claude-darkTextMuted text-claude-textMuted group-hover:text-claude-accent transition-colors" />
-                </button>
-              ))}
+                )}
+              </div>
+
+              {!claimed ? (
+                <>
+                  <p className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted mb-3">
+                    {t('onboardingClaimDesc')}
+                  </p>
+                  <button
+                    onClick={handleClaim}
+                    disabled={claiming}
+                    className="w-full py-2.5 rounded-lg bg-claude-accent hover:bg-claude-accentHover disabled:opacity-60 text-white text-sm font-medium transition-colors"
+                  >
+                    {claiming ? t('onboardingClaiming') : t('onboardingClaimBtn')}
+                  </button>
+                </>
+              ) : (
+                <div className="flex items-center justify-between mt-2">
+                  <div>
+                    <div className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted">剩余额度</div>
+                    <div className="text-sm font-semibold dark:text-claude-darkText text-claude-text">
+                      {(cloudService.getCachedCredits() / 10000).toFixed(0)}万 tokens
+                    </div>
+                    <div className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted">
+                      约可对话 {cloudService.estimateChats()} 次
+                    </div>
+                  </div>
+                  <button
+                    onClick={onComplete}
+                    className="px-4 py-2 rounded-lg bg-claude-accent hover:bg-claude-accentHover text-white text-sm font-medium transition-colors"
+                  >
+                    开始使用
+                  </button>
+                </div>
+              )}
             </div>
+          </div>
+
+          {/* ── 自带 API Key（折叠） ── */}
+          <div className="rounded-xl border dark:border-claude-darkBorder border-gray-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setKeyExpanded(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-3.5 text-left hover:dark:bg-claude-darkBg hover:bg-gray-50 transition-colors"
+            >
+              <span className="text-sm font-medium dark:text-claude-darkText text-claude-text">
+                {t('onboardingOwnKey')}
+              </span>
+              {keyExpanded
+                ? <ChevronDownIcon className="h-4 w-4 dark:text-claude-darkTextMuted text-claude-textMuted" />
+                : <ChevronRightIcon className="h-4 w-4 dark:text-claude-darkTextMuted text-claude-textMuted" />
+              }
+            </button>
+
+            {keyExpanded && (
+              <div className="px-4 pb-4 pt-1 border-t dark:border-claude-darkBorder border-gray-100 space-y-2">
+                {!selectedProvider ? (
+                  /* Provider list */
+                  <div className="space-y-1.5">
+                    {PROVIDERS.map((p) => (
+                      <button
+                        key={p.key}
+                        onClick={() => { setSelectedProvider(p); setApiKey(''); setKeyError(''); }}
+                        className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border dark:border-claude-darkBorder border-gray-200 dark:bg-claude-darkBg bg-gray-50 hover:border-claude-accent dark:hover:border-claude-accent transition-all text-left group"
+                      >
+                        <span className="text-sm dark:text-claude-darkText text-claude-text">{p.label}</span>
+                        <ChevronRightIcon className="h-3.5 w-3.5 dark:text-claude-darkTextMuted text-claude-textMuted group-hover:text-claude-accent transition-colors" />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  /* Key input */
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedProvider(null)}
+                        className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted hover:text-claude-accent transition-colors"
+                      >
+                        ← {t('onboardingBack')}
+                      </button>
+                      <span className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted">
+                        {selectedProvider.label}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showKey ? 'text' : 'password'}
+                        value={apiKey}
+                        onChange={(e) => { setApiKey(e.target.value); setKeyError(''); }}
+                        placeholder={t('setupWizardApiKeyPlaceholder')}
+                        autoFocus
+                        className="w-full pr-9 pl-3 py-2.5 rounded-lg border dark:border-claude-darkBorder border-gray-200 dark:bg-claude-darkBg bg-gray-50 dark:text-claude-darkText text-claude-text text-sm outline-none focus:border-claude-accent transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(v => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 dark:text-claude-darkTextMuted text-claude-textMuted hover:text-claude-accent transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showKey ? <EyeSlashIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    {keyError && <p className="text-xs text-red-500 pl-0.5">{keyError}</p>}
+                    <button
+                      onClick={() => handleOpenUrl(selectedProvider.getKeyUrl)}
+                      className="text-xs text-claude-accent hover:underline"
+                    >
+                      {t('setupWizardApiKeyGetKey')}
+                    </button>
+                    <button
+                      onClick={handleSaveKey}
+                      disabled={saving}
+                      className="w-full py-2.5 rounded-lg bg-claude-accent hover:bg-claude-accentHover disabled:opacity-60 text-white text-sm font-medium transition-colors"
+                    >
+                      {saving ? t('onboardingSaving') : t('onboardingFinish')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 稍后再说 */}
+          <div className="text-center pt-1">
             <button
               onClick={onComplete}
-              className="mt-5 w-full text-center text-sm dark:text-claude-darkTextMuted text-claude-textMuted hover:underline"
+              className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted hover:underline"
             >
-              {t('setupWizardSkip')}
+              {t('onboardingSkip')}
             </button>
           </div>
-        )}
-
-        {/* ── API Key ──────────────────────────────────────── */}
-        {step === 'apikey' && selectedProvider && (
-          <div className="px-6 pb-8 pt-2">
-            <h2 className="text-xl font-bold dark:text-claude-darkText text-claude-text mb-1">
-              {t('setupWizardApiKeyTitle')}
-            </h2>
-            <p className="text-sm dark:text-claude-darkTextMuted text-claude-textMuted mb-5">
-              {selectedProvider.label}
-            </p>
-
-            <div className="relative mb-1">
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => { setApiKey(e.target.value); setKeyError(''); }}
-                placeholder={t('setupWizardApiKeyPlaceholder')}
-                autoFocus
-                className="w-full pr-10 pl-4 py-3 rounded-xl border dark:border-claude-darkBorder border-gray-200 dark:bg-claude-darkBg bg-gray-50 dark:text-claude-darkText text-claude-text text-sm outline-none focus:border-claude-accent transition-colors"
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 dark:text-claude-darkTextMuted text-claude-textMuted hover:text-claude-accent transition-colors"
-                tabIndex={-1}
-              >
-                {showKey
-                  ? <EyeSlashIcon className="h-4 w-4" />
-                  : <EyeIcon className="h-4 w-4" />}
-              </button>
-            </div>
-
-            {keyError && (
-              <p className="text-xs text-red-500 mb-3 pl-1">{keyError}</p>
-            )}
-
-            <button
-              onClick={() => handleOpenUrl(selectedProvider.getKeyUrl)}
-              className="text-xs text-claude-accent hover:underline mb-5 block"
-            >
-              {t('setupWizardApiKeyGetKey')}
-            </button>
-
-            <button
-              onClick={handleFinish}
-              disabled={saving}
-              className="w-full py-3 rounded-xl bg-claude-accent hover:bg-claude-accentHover disabled:opacity-60 text-white font-medium transition-colors shadow-md mb-3"
-            >
-              {saving ? t('setupWizardApiKeyTesting') : t('setupWizardApiKeyFinish')}
-            </button>
-
-            <button
-              onClick={() => setStep('provider')}
-              className="w-full text-center text-sm dark:text-claude-darkTextMuted text-claude-textMuted hover:underline"
-            >
-              {t('setupWizardBack')}
-            </button>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
