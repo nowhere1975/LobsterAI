@@ -381,7 +381,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
   const [isTogglingCloud, setIsTogglingCloud] = useState(false);
   const [showRechargeModal, setShowRechargeModal] = useState(false);
   const [rechargeStep, setRechargeStep] = useState<'select' | 'waiting' | 'success'>('select');
-  const [rechargeOrderId, setRechargeOrderId] = useState('');
   const [rechargePollTimer, setRechargePollTimer] = useState<ReturnType<typeof setInterval> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1857,7 +1856,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
                           onClick={async () => {
                             try {
                               const order = await cloudService.createPayOrder(pkg.id);
-                              setRechargeOrderId(order.orderId);
                               window.electron.shell.openExternal(order.payUrl);
                               setRechargeStep('waiting');
                               // Poll every 3s, max 10min
