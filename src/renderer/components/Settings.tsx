@@ -380,7 +380,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
   const [cloudDeviceId, setCloudDeviceId] = useState('');
   const [isTogglingCloud, setIsTogglingCloud] = useState(false);
   const [showRechargeModal, setShowRechargeModal] = useState(false);
-  const [rechargeStep, setRechargeStep] = useState<'select' | 'waiting' | 'success'>('select');
+  const [rechargeStep, setRechargeStep] = useState<'select' | 'waiting' | 'success' | 'error'>('select');
+  const [rechargeError, setRechargeError] = useState('');
   const [rechargePollTimer, setRechargePollTimer] = useState<ReturnType<typeof setInterval> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1876,6 +1877,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
                               setRechargePollTimer(timer);
                             } catch (err: any) {
                               console.error('[recharge] failed:', err);
+                              setRechargeError(err?.message || '创建订单失败，请稍后重试');
+                              setRechargeStep('error');
                             }
                           }}
                           className="w-full text-left px-4 py-3 rounded-xl border dark:border-claude-darkBorder border-claude-border hover:border-claude-accent dark:hover:border-claude-accent transition-colors text-sm dark:text-claude-darkText text-claude-text"
@@ -1907,6 +1910,20 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
                         className="px-4 py-2 text-sm font-medium rounded-lg bg-claude-accent text-white hover:opacity-90"
                       >
                         OK
+                      </button>
+                    </div>
+                  )}
+
+                  {rechargeStep === 'error' && (
+                    <div className="text-center space-y-3 py-2">
+                      <div className="text-2xl">⚠️</div>
+                      <p className="text-sm text-red-500">{rechargeError}</p>
+                      <button
+                        type="button"
+                        onClick={() => setRechargeStep('select')}
+                        className="px-4 py-2 text-sm font-medium rounded-lg border dark:border-claude-darkBorder border-claude-border hover:border-claude-accent transition-colors"
+                      >
+                        重试
                       </button>
                     </div>
                   )}
