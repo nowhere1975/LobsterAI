@@ -306,13 +306,21 @@ app.post('/chat', async (req, res) => {
 // POST /pay/create
 // ---------------------------------------------------------------------------
 app.post('/pay/create', async (req, res) => {
-  const { deviceId, packageId } = req.body;
+  const { deviceId, packageId, customAmount } = req.body;
 
   if (!validateDeviceId(deviceId)) {
     return res.status(400).json({ error: 'INVALID_DEVICE_ID' });
   }
-  const pkg = PACKAGES[packageId];
-  if (!pkg) return res.status(400).json({ error: 'INVALID_PACKAGE' });
+
+  let pkg;
+  if (packageId === 'pkg_custom') {
+    const amt = Math.floor(Number(customAmount));
+    if (!amt || amt < 1) return res.status(400).json({ error: 'INVALID_CUSTOM_AMOUNT' });
+    pkg = { amount: amt, credits: amt * 1000, label: `UdiskAI 积分 · ${amt * 1000}` };
+  } else {
+    pkg = PACKAGES[packageId];
+    if (!pkg) return res.status(400).json({ error: 'INVALID_PACKAGE' });
+  }
 
   const user = stmtGetUser.get(deviceId);
   if (!user) return res.status(404).json({ error: 'DEVICE_NOT_FOUND' });

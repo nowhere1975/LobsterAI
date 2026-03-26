@@ -184,14 +184,14 @@ class CloudService {
 
   // ── 充值 ──────────────────────────────────────────────────────────────────
 
-  async createPayOrder(packageId: string): Promise<{ orderId: string; payUrl: string; amount: number; credits: number }> {
+  async createPayOrder(packageId: string, customAmount?: number): Promise<{ orderId: string; payUrl: string; amount: number; credits: number }> {
     const cfg = this.getCloudConfig();
     const deviceId = await this.getOrCreateDeviceId();
 
     const res = await fetch(`${cfg.serverUrl}/pay/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId, packageId }),
+      body: JSON.stringify({ deviceId, packageId, customAmount }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

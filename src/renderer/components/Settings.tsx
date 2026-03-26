@@ -384,6 +384,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
   const [rechargeError, setRechargeError] = useState('');
   const [rechargePollTimer, setRechargePollTimer] = useState<ReturnType<typeof setInterval> | null>(null);
   const [rechargeOrderId, setRechargeOrderId] = useState<string | null>(null);
+  const [customAmount, setCustomAmount] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, setNoticeMessage] = useState<string | null>(notice ?? null);
@@ -1999,14 +2000,19 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
               <div className="h-1 bg-gradient-to-r from-claude-accent via-blue-500 to-purple-500" />
               <div className="px-6 py-6">
                 {/* 标题行 */}
-                <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-claude-accent/10 dark:bg-claude-accent/20 flex items-center justify-center">
                       <CubeIcon className="h-5 w-5 text-claude-accent" />
                     </div>
-                    <span className="text-base font-semibold dark:text-claude-darkText text-claude-text">
-                      {cloudEnabled ? i18nService.t('onboardingCreditsTitle') : i18nService.t('onboardingClaimTitle')}
-                    </span>
+                    <div>
+                      <span className="text-base font-semibold dark:text-claude-darkText text-claude-text">
+                        {cloudEnabled ? i18nService.t('onboardingCreditsTitle') : i18nService.t('onboardingClaimTitle')}
+                      </span>
+                      {cloudEnabled && (
+                        <p className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted">1元=1000积分</p>
+                      )}
+                    </div>
                   </div>
                   {cloudEnabled && (
                     <span className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 font-medium">
@@ -2014,6 +2020,24 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
                       {i18nService.t('cloudActivated')}
                     </span>
                   )}
+                </div>
+
+                {/* DeepSeek 模型信息 + 下载链接 */}
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-1.5">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="flex-shrink-0">
+                      <circle cx="12" cy="12" r="12" fill="#4D6BFE"/>
+                      <text x="12" y="16.5" textAnchor="middle" fontSize="10" fontWeight="bold" fill="white" fontFamily="sans-serif">DS</text>
+                    </svg>
+                    <span className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted">DeepSeek-V3 (deepseek-chat)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.electron.shell.openExternal('https://UdiskAI.top')}
+                    className="text-xs text-claude-accent hover:underline"
+                  >
+                    {i18nService.t('cloudDownloadPage')}
+                  </button>
                 </div>
 
                 {!cloudEnabled ? (
@@ -2697,6 +2721,63 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice }) => {
                       {pkg.label}
                     </button>
                   ))}
+
+                  {/* 自定义金额 */}
+                  <div className="rounded-xl border dark:border-claude-darkBorder border-claude-border p-3 space-y-2">
+                    <p className="text-xs dark:text-claude-darkTextMuted text-claude-textMuted">{i18nService.t('cloudRechargePkgCustom')}</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={customAmount}
+                        onChange={e => setCustomAmount(e.target.value)}
+                        placeholder={i18nService.t('cloudRechargeCustomPlaceholder')}
+                        className="flex-1 px-3 py-2 text-sm rounded-lg border dark:border-claude-darkBorder border-claude-border dark:bg-claude-darkBg bg-white dark:text-claude-darkText text-claude-text outline-none focus:border-claude-accent"
+                      />
+                      <button
+                        type="button"
+                        disabled={!customAmount || Number(customAmount) < 1}
+                        onClick={async () => {
+                          const amt = Math.floor(Number(customAmount));
+                          if (amt < 1) return;
+                          try {
+                            const order = await cloudService.createPayOrder('pkg_custom', amt);
+                            window.electron.shell.openExternal(order.payUrl);
+                            setRechargeOrderId(order.orderId);
+                            setRechargeStep('waiting');
+                            let attempts = 0;
+                            const timer = setInterval(async () => {
+                              attempts++;
+                              if (attempts > 200) { clearInterval(timer); setShowRechargeModal(false); return; }
+                              try {
+                                const status = await cloudService.pollPayStatus(order.orderId);
+                                if (status === 'paid') {
+                                  clearInterval(timer);
+                                  const newCredits = configService.getConfig().cloud?.credits ?? 0;
+                                  setCloudCredits(newCredits);
+                                  setRechargeStep('success');
+                                }
+                              } catch { /* retry */ }
+                            }, 3000);
+                            setRechargePollTimer(timer);
+                          } catch (err: any) {
+                            console.error('[recharge] failed:', err);
+                            setRechargeError(err?.message || i18nService.t('cloudRechargeFailed'));
+                            setRechargeStep('error');
+                          }
+                        }}
+                        className="px-4 py-2 text-sm font-medium rounded-lg bg-claude-accent text-white hover:opacity-90 disabled:opacity-40 transition-opacity"
+                      >
+                        {i18nService.t('cloudRecharge')}
+                      </button>
+                    </div>
+                    {customAmount && Number(customAmount) >= 1 && (
+                      <p className="text-xs text-claude-accent">
+                        ¥{Math.floor(Number(customAmount))} = {(Math.floor(Number(customAmount)) * 1000).toLocaleString()} 积分
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 
