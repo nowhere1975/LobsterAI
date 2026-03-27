@@ -469,40 +469,40 @@ app.post('/v1/messages', async (req, res) => {
     res.write(`event: ping\ndata: ${JSON.stringify({ type: 'ping' })}\n\n`);
 
     const streamPayload = JSON.stringify({ model: targetModel, messages: openaiMessages, stream: true });
-    const abortCtrl = new AbortController();
-    req.on('close', () => abortCtrl.abort());
+    const streamOptions = {
+      hostname: dsUrl.hostname,
+      path: dsUrl.pathname,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(streamPayload),
+        'Accept-Encoding': 'identity',
+        'Connection': 'close',
+      },
+      agent: new https.Agent({ keepAlive: false }),
+    };
 
-    try {
-      const fetchRes = await fetch(`${DEEPSEEK_BASE_URL}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
-          'Content-Type': 'application/json',
-          'Accept-Encoding': 'identity',
-        },
-        body: streamPayload,
-        signal: abortCtrl.signal,
-      });
+    const dsReq = proto.request(streamOptions, dsRes => {
+      console.log('[v1/messages/stream] upstream status:', dsRes.statusCode);
 
-      if (!fetchRes.ok) {
-        const errBody = await fetchRes.text().catch(() => '');
-        console.error('[v1/messages/stream] upstream non-200:', fetchRes.status, errBody.slice(0, 200));
-        if (!res.writableEnded) {
-          res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream error' } })}\n\n`);
-          res.end();
-        }
+      if (dsRes.statusCode !== 200) {
+        let errBody = '';
+        dsRes.on('data', c => { errBody += c; });
+        dsRes.on('end', () => {
+          console.error('[v1/messages/stream] upstream error body:', errBody.slice(0, 200));
+          if (!res.writableEnded) {
+            res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream error' } })}\n\n`);
+            res.end();
+          }
+        });
         return;
       }
 
-      const reader = fetchRes.body.getReader();
-      const decoder = new TextDecoder();
       let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (req.destroyed) { reader.cancel(); break; }
-        buffer += decoder.decode(value, { stream: true });
+      dsRes.on('data', chunk => {
+        if (req.destroyed) return;
+        buffer += chunk.toString();
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) {
@@ -517,9 +517,18 @@ app.post('/v1/messages', async (req, res) => {
             }
           } catch { /* skip malformed */ }
         }
-      }
+      });
 
-      if (!res.writableEnded) {
+      dsRes.on('error', err => {
+        console.error('[v1/messages/stream] response stream error:', err.message);
+        if (!res.writableEnded) {
+          res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Stream error' } })}\n\n`);
+          res.end();
+        }
+      });
+
+      dsRes.on('end', () => {
+        if (res.writableEnded) return;
         stmtDeduct.run(CREDITS_PER_CHAT, deviceId, CREDITS_PER_CHAT);
         const remaining = Math.max(0, user.credits - CREDITS_PER_CHAT);
         res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
@@ -527,15 +536,20 @@ app.post('/v1/messages', async (req, res) => {
         res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
         res.end();
         console.debug(`[v1/messages/stream] deducted ${CREDITS_PER_CHAT} credits, remaining ~${remaining}`);
-      }
-    } catch (err) {
-      if (err.name === 'AbortError') return; // client disconnected, no-op
-      console.error('[v1/messages/stream] upstream failed:', err);
+      });
+    });
+
+    dsReq.on('error', err => {
+      console.error('[v1/messages/stream] upstream request failed:', err.message, err.code);
       if (!res.writableEnded) {
         res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream unavailable' } })}\n\n`);
         res.end();
       }
-    }
+    });
+
+    dsReq.write(streamPayload);
+    dsReq.end();
+    req.on('close', () => dsReq.destroy());
 
   } else {
     const options = {
