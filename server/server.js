@@ -472,6 +472,9 @@ app.post('/v1/messages', async (req, res) => {
       },
       agent: false,
     }, dsRes => {
+      console.log('[v1/messages/stream] upstream status:', dsRes.statusCode);
+      dsRes.on('error', err => console.error('[v1/messages/stream] dsRes error:', err.message, err.code));
+      dsRes.on('close', () => console.log('[v1/messages/stream] dsRes closed'));
       if (dsRes.statusCode !== 200) {
         let errBody = '';
         dsRes.on('data', c => { errBody += c; });
