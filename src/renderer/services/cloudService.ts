@@ -256,7 +256,7 @@ class CloudService {
       deviceId: '',
       credits: 0,
       lastSyncAt: 0,
-      serverUrl: 'https://udiskai.top/api',
+      serverUrl: 'http://1.14.96.63:3000',
     };
   }
 

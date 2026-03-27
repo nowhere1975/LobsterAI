@@ -271,7 +271,7 @@ export function resolveCurrentApiConfig(target: OpenAICompatProxyTarget = 'local
       modelName?: string;
     };
     const deviceId = cloud.deviceId?.trim();
-    const serverUrl = (cloud.serverUrl?.trim() || 'https://udiskai.top/api').replace(/\/$/, '');
+    const serverUrl = (cloud.serverUrl?.trim() || 'http://1.14.96.63:3000').replace(/\/$/, '');
     const modelId = cloud.modelId?.trim() || 'deepseek-chat';
     if (!deviceId) {
       return { config: null, error: 'Cloud mode: device not registered yet.' };
