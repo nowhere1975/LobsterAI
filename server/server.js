@@ -459,15 +459,7 @@ app.post('/v1/messages', async (req, res) => {
 
   if (isStream) {
     // Stream: convert OpenAI SSE → Anthropic SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('X-Accel-Buffering', 'no');
-
     const msgId = `msg_${Date.now()}`;
-    res.write(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: CLOUD_MODEL_NAME, stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`);
-    res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
-    res.write(`event: ping\ndata: ${JSON.stringify({ type: 'ping' })}\n\n`);
-
     const streamPayload = JSON.stringify({ model: targetModel, messages: openaiMessages, stream: true });
     const streamOptions = {
       hostname: dsUrl.hostname,
@@ -477,22 +469,37 @@ app.post('/v1/messages', async (req, res) => {
         'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(streamPayload),
+        'Accept-Encoding': 'identity',
+        'Connection': 'close',
       },
       agent: false,
     };
 
     const dsReq = proto.request(streamOptions, dsRes => {
+      console.debug('[v1/messages/stream] upstream status:', dsRes.statusCode);
+
       if (dsRes.statusCode !== 200) {
         let errBody = '';
         dsRes.on('data', c => { errBody += c; });
         dsRes.on('end', () => {
-          if (!res.writableEnded) {
+          console.error('[v1/messages/stream] upstream non-200:', dsRes.statusCode, errBody.slice(0, 200));
+          if (!res.headersSent) {
+            res.status(502).json({ type: 'error', error: { type: 'api_error', message: 'Upstream error' } });
+          } else if (!res.writableEnded) {
             res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream error' } })}\n\n`);
             res.end();
           }
         });
         return;
       }
+
+      // Upstream OK — now start SSE response
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.write(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: CLOUD_MODEL_NAME, stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`);
+      res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
+      res.write(`event: ping\ndata: ${JSON.stringify({ type: 'ping' })}\n\n`);
 
       let buffer = '';
       dsRes.on('data', chunk => {
@@ -514,6 +521,14 @@ app.post('/v1/messages', async (req, res) => {
         }
       });
 
+      dsRes.on('error', err => {
+        console.error('[v1/messages/stream] response stream error:', err.message, err.code);
+        if (!res.writableEnded) {
+          res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Stream error' } })}\n\n`);
+          res.end();
+        }
+      });
+
       dsRes.on('end', () => {
         if (res.writableEnded) return;
         stmtDeduct.run(CREDITS_PER_CHAT, deviceId, CREDITS_PER_CHAT);
@@ -522,13 +537,20 @@ app.post('/v1/messages', async (req, res) => {
         res.write(`event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: CREDITS_PER_CHAT } })}\n\n`);
         res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
         res.end();
-        console.debug(`[v1/messages/stream] deducted ${CREDITS_PER_CHAT} credits, remaining ~${remaining}`);
+        console.debug(`[v1/messages/stream] completed, deducted ${CREDITS_PER_CHAT} credits, remaining ~${remaining}`);
       });
     });
 
+    dsReq.on('socket', socket => {
+      socket.once('connect', () => console.debug('[v1/messages/stream] TCP connected'));
+      socket.once('secureConnect', () => console.debug('[v1/messages/stream] TLS connected'));
+    });
+
     dsReq.on('error', err => {
-      console.error('[v1/messages/stream] upstream failed:', err);
-      if (!res.writableEnded) {
+      console.error('[v1/messages/stream] upstream request failed:', err.message, 'code:', err.code);
+      if (!res.headersSent) {
+        res.status(502).json({ type: 'error', error: { type: 'api_error', message: 'Upstream unavailable' } });
+      } else if (!res.writableEnded) {
         res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream unavailable' } })}\n\n`);
         res.end();
       }
