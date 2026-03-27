@@ -467,31 +467,37 @@ app.post('/v1/messages', async (req, res) => {
   const proto = dsUrl.protocol === 'https:' ? https : http;
 
   if (isStream) {
-    // Stream: convert OpenAI SSE → Anthropic SSE
+    // Stream: use fetch for reliable long-lived connection, convert OpenAI SSE → Anthropic SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    // Send Anthropic stream preamble
     const msgId = `msg_${Date.now()}`;
     res.write(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: CLOUD_MODEL_NAME, stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`);
     res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
     res.write(`event: ping\ndata: ${JSON.stringify({ type: 'ping' })}\n\n`);
 
-    const dsReq = proto.request(options, dsRes => {
-      if (dsRes.statusCode !== 200) {
-        let errBody = '';
-        dsRes.on('data', c => { errBody += c; });
-        dsRes.on('end', () => {
-          res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream error' } })}\n\n`);
-          res.end();
-        });
+    try {
+      const dsRes = await fetch(`${DEEPSEEK_BASE_URL}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: targetModel, messages: openaiMessages, stream: true }),
+      });
+
+      if (!dsRes.ok) {
+        res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream error' } })}\n\n`);
+        res.end();
         return;
       }
 
+      const decoder = new TextDecoder();
       let buffer = '';
-      dsRes.on('data', chunk => {
-        buffer += chunk.toString();
+      for await (const chunk of dsRes.body) {
+        if (req.destroyed) break;
+        buffer += decoder.decode(chunk, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const line of lines) {
@@ -506,28 +512,22 @@ app.post('/v1/messages', async (req, res) => {
             }
           } catch { /* skip malformed */ }
         }
-      });
+      }
 
-      dsRes.on('end', () => {
-        stmtDeduct.run(CREDITS_PER_CHAT, deviceId, CREDITS_PER_CHAT);
-        const remaining = Math.max(0, user.credits - CREDITS_PER_CHAT);
-        res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
-        res.write(`event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: CREDITS_PER_CHAT } })}\n\n`);
-        res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
-        res.end();
-        console.debug(`[v1/messages/stream] deducted ${CREDITS_PER_CHAT} credits, remaining ~${remaining}`);
-      });
-    });
-
-    dsReq.on('error', err => {
-      console.error('[v1/messages/stream] upstream failed:', err);
-      res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream unavailable' } })}\n\n`);
+      stmtDeduct.run(CREDITS_PER_CHAT, deviceId, CREDITS_PER_CHAT);
+      const remaining = Math.max(0, user.credits - CREDITS_PER_CHAT);
+      res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
+      res.write(`event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: CREDITS_PER_CHAT } })}\n\n`);
+      res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
       res.end();
-    });
-
-    dsReq.write(payload);
-    dsReq.end();
-    req.on('close', () => dsReq.destroy());
+      console.debug(`[v1/messages/stream] deducted ${CREDITS_PER_CHAT} credits, remaining ~${remaining}`);
+    } catch (err) {
+      console.error('[v1/messages/stream] upstream failed:', err);
+      if (!res.writableEnded) {
+        res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream unavailable' } })}\n\n`);
+        res.end();
+      }
+    }
 
   } else {
     // Non-streaming: convert OpenAI response → Anthropic response
