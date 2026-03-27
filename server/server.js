@@ -468,46 +468,58 @@ app.post('/v1/messages', async (req, res) => {
     res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
     res.write(`event: ping\ndata: ${JSON.stringify({ type: 'ping' })}\n\n`);
 
-    // Streaming not supported on this server's network path to DeepSeek.
-    // Use non-streaming upstream request and emit a complete SSE response at once.
-    const nonStreamPayload = JSON.stringify({ model: targetModel, messages: openaiMessages, stream: false });
-    const nonStreamOptions = {
+    const streamPayload = JSON.stringify({ model: targetModel, messages: openaiMessages, stream: true });
+    const streamOptions = {
       hostname: dsUrl.hostname,
       path: dsUrl.pathname,
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(nonStreamPayload),
+        'Content-Length': Buffer.byteLength(streamPayload),
       },
       agent: false,
     };
 
-    const dsReq = proto.request(nonStreamOptions, dsRes => {
-      let body = '';
-      dsRes.on('data', c => { body += c; });
+    const dsReq = proto.request(streamOptions, dsRes => {
+      if (dsRes.statusCode !== 200) {
+        let errBody = '';
+        dsRes.on('data', c => { errBody += c; });
+        dsRes.on('end', () => {
+          if (!res.writableEnded) {
+            res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream error' } })}\n\n`);
+            res.end();
+          }
+        });
+        return;
+      }
+
+      let buffer = '';
+      dsRes.on('data', chunk => {
+        if (req.destroyed) return;
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              res.write(`event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: delta } })}\n\n`);
+            }
+          } catch { /* skip malformed */ }
+        }
+      });
+
       dsRes.on('end', () => {
         if (res.writableEnded) return;
-        if (dsRes.statusCode !== 200) {
-          console.error('[v1/messages/stream] upstream non-200:', dsRes.statusCode, body.slice(0, 200));
-          res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream error' } })}\n\n`);
-          res.end();
-          return;
-        }
-        let parsed;
-        try { parsed = JSON.parse(body); } catch {
-          res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream parse error' } })}\n\n`);
-          res.end();
-          return;
-        }
-        const text = parsed.choices?.[0]?.message?.content || '';
         stmtDeduct.run(CREDITS_PER_CHAT, deviceId, CREDITS_PER_CHAT);
         const remaining = Math.max(0, user.credits - CREDITS_PER_CHAT);
-        if (text) {
-          res.write(`event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })}\n\n`);
-        }
         res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
-        res.write(`event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: parsed.usage?.completion_tokens || CREDITS_PER_CHAT } })}\n\n`);
+        res.write(`event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: CREDITS_PER_CHAT } })}\n\n`);
         res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
         res.end();
         console.debug(`[v1/messages/stream] deducted ${CREDITS_PER_CHAT} credits, remaining ~${remaining}`);
