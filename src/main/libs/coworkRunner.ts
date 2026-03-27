@@ -38,8 +38,10 @@ const STDERR_FATAL_PATTERNS = [
   /ECONNREFUSED/,
   /could not connect/i,
   /api[_ ]key[_ ]not[_ ]valid/i,
-  /permission[_ ]denied/i,
-  /access[_ ]denied/i,
+  // NOTE: "permission denied" and "access denied" intentionally removed —
+  // git-bash on Windows emits these harmlessly at startup (e.g. /proc/ paths)
+  // and would falsely abort sessions. Real API auth failures are caught by
+  // /unauthorized/ and /invalid[_ ]api[_ ]key/ above.
   /rate[_ ]limit/i,
   /quota[_ ]exceeded/i,
   /billing/i,

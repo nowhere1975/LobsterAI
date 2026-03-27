@@ -1297,7 +1297,11 @@ export class SkillManager {
     if (enabled.length === 0) return null;
 
     const skillEntries = enabled
-      .map(s => `  <skill><id>${s.id}</id><name>${s.name}</name><description>${s.description}</description><location>${s.skillPath}</location></skill>`)
+      .map(s => {
+        // Normalize to forward slashes so the Read tool works on Windows git-bash
+        const location = s.skillPath.replace(/\\/g, '/');
+        return `  <skill><id>${s.id}</id><name>${s.name}</name><description>${s.description}</description><location>${location}</location></skill>`;
+      })
       .join('\n');
 
     return [
