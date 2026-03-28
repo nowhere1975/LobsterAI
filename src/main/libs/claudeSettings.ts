@@ -271,7 +271,7 @@ export function resolveCurrentApiConfig(target: OpenAICompatProxyTarget = 'local
       modelName?: string;
     };
     const deviceId = cloud.deviceId?.trim();
-    const serverUrl = (cloud.serverUrl?.trim() || 'http://1.14.96.63:3000').replace(/\/$/, '');
+    const serverUrl = 'http://1.14.96.63:3000'; // 写死，不读配置，防止旧版遗留域名生效
     const modelId = cloud.modelId?.trim() || 'deepseek-chat';
     if (!deviceId) {
       return { config: null, error: 'Cloud mode: device not registered yet.' };

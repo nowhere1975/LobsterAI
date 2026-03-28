@@ -17,9 +17,14 @@ const path = require("path");
 const {
   Document, Packer, Paragraph, TextRun, Footer, Header,
   AlignmentType, PageOrientation, BorderStyle,
-  convertInchesToTwip,
-  PageNumber,
+  convertInchesToTwip, PageNumber,
   TabStopPosition, TabStopType,
+  // Phase 1: 表格、图片、列表
+  Table, TableRow, TableCell, WidthType, ShadingType,
+  ImageRun,
+  LevelFormat,
+  // Phase 2: 超链接
+  ExternalHyperlink,
 } = require("docx");
 
 // ─────────────────────────────────────────────
@@ -42,6 +47,12 @@ const F = {
 const CM = (n) => Math.round(n * 567);
 const PT = (n) => n * 20;  // points → twips
 const MM = (n) => Math.round(n * 56.7); // mm → twips
+
+// 页面可用宽度（DXA）= A4宽(11906) - 左边距 - 右边距
+const USABLE_DXA = {
+  official: 8844,  // 11906 - CM(2.8)[1588] - CM(2.6)[1474]
+  general:  8312,  // 11906 - CM(3.17)[1797] - CM(3.17)[1797]
+};
 
 // GB/T 9704-2012：版心 156mm×225mm，天头 37mm，订口 28mm
 // 一行 = 3号字高度(16pt ≈ 5.64mm) + 行距(7/8 × 5.64mm ≈ 4.94mm) ≈ 10.23mm
@@ -70,6 +81,52 @@ const LAYOUT = {
     bodySizePt  : 14,   // 四号
     lineSpacingMultiple : 1.5,  // 1.5倍行距
     footerStyle : "arabic",    // 页码：1
+  },
+};
+
+// ─────────────────────────────────────────────
+// Phase 3：预设风格配方
+// preset 提供 mode/style 默认值及外观覆盖，用户仍可通过显式字段覆盖
+// ─────────────────────────────────────────────
+
+const PRESETS = {
+  // 政府公文（standard 红头公文请用 gov-strict）
+  gov: {
+    mode: "official", style: "standard",
+  },
+  "gov-strict": {
+    mode: "official", style: "strict",
+  },
+  // 企业报告：蓝色标题，适合商业报告/白皮书
+  corporate: {
+    mode: "general",
+    titleColor: "2E75B6",
+    h1Color:    "2E75B6",
+    h2Color:    "2E75B6",
+  },
+  // 学术论文：双倍行距，适合研究报告/论文
+  academic: {
+    mode: "general",
+    lineSpacingMultiple: 2.0,
+  },
+  // 内部备忘录：紧凑行距，适合会议纪要/内部通知
+  memo: {
+    mode: "general",
+    lineSpacingMultiple: 1.2,
+    marginOverride: { top: CM(2.0), bottom: CM(2.0), left: CM(2.5), right: CM(2.5) },
+  },
+  // 极简打印：宋体贯穿，适合合同/协议
+  minimal: {
+    mode: "general",
+    lineSpacingMultiple: 1.2,
+    h1Font: "宋体",
+    titleFont: "宋体",
+  },
+  // 中文通用报告：微软雅黑标题，现代商务风格
+  "chinese-report": {
+    mode: "general",
+    h1Font: "微软雅黑",
+    titleFont: "微软雅黑",
   },
 };
 
@@ -212,10 +269,490 @@ function makeFooters(style) {
 }
 
 // ─────────────────────────────────────────────
+// Phase 1：辅助 — 提取图片像素尺寸（PNG / JPEG，无需外部依赖）
+// ─────────────────────────────────────────────
+
+function getImageDimensions(buf) {
+  // PNG：magic bytes 89 50 4E 47，宽高在 offset 16/20
+  if (buf.length > 24 &&
+      buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+  }
+  // JPEG：SOF 段（0xFF 0xCx，排除 C4/C8/CC）
+  if (buf.length > 4 && buf[0] === 0xFF && buf[1] === 0xD8) {
+    let i = 2;
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xFF) break;
+      const marker = buf[i + 1];
+      const segLen  = buf.readUInt16BE(i + 2);
+      if (marker >= 0xC0 && marker <= 0xCF &&
+          marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+        return { w: buf.readUInt16BE(i + 7), h: buf.readUInt16BE(i + 5) };
+      }
+      i += 2 + segLen;
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// Phase 1：表格渲染
+// 支持三种样式：three-line（三线表，默认）/ bordered（全框线）/ light-grid（细网格）
+// ─────────────────────────────────────────────
+
+function renderTable(node, ctx) {
+  const { usableDxa, bodySizePt, cnFont, lineSpacingFixed, lineSpacingMultiple } = ctx;
+  const { caption, headers = [], rows = [], style = "three-line", widths } = node;
+  const items = [];
+
+  // 表格标题（上方，居中）
+  if (caption) {
+    items.push(makePara({
+      runs: [cnRun({ text: caption, cnFont, sizePt: bodySizePt })],
+      alignment: AlignmentType.CENTER,
+      spaceAfter: 60,
+    }));
+  }
+
+  const allRows = headers.length > 0 ? [headers, ...rows] : rows;
+  const colCount = allRows.reduce((max, r) => Math.max(max, r.length), 0);
+  if (colCount === 0) return items;
+
+  // 列宽计算（DXA）
+  let colWidths;
+  if (widths && widths.length >= colCount) {
+    const totalPct = widths.slice(0, colCount).reduce((s, w) => s + w, 0);
+    colWidths = widths.slice(0, colCount).map(w => Math.round(w / totalPct * usableDxa));
+  } else {
+    const perCol = Math.floor(usableDxa / colCount);
+    colWidths = Array(colCount).fill(perCol);
+  }
+  // 末列补齐，确保总宽 = 可用宽度
+  const widthSum = colWidths.reduce((s, w) => s + w, 0);
+  colWidths[colWidths.length - 1] += (usableDxa - widthSum);
+
+  // 边框定义
+  const BNONE   = { style: "none",   size: 0,  color: "auto"   };
+  const BTHICK  = { style: "single", size: 12, color: "000000" }; // 1.5pt
+  const BMEDIUM = { style: "single", size: 8,  color: "000000" }; // 1pt
+  const BTHIN   = { style: "single", size: 4,  color: "000000" }; // 0.5pt
+  const BLIGHT  = { style: "single", size: 4,  color: "AAAAAA" }; // 0.5pt 灰
+
+  function getCellBorders(isHeader, isLastRow) {
+    if (style === "bordered")   return { top: BTHIN,  bottom: BTHIN,  left: BTHIN,  right: BTHIN  };
+    if (style === "light-grid") return { top: BLIGHT, bottom: BLIGHT, left: BLIGHT, right: BLIGHT };
+    // three-line（默认）
+    if (isHeader)   return { top: BTHICK,  bottom: BMEDIUM, left: BNONE, right: BNONE };
+    if (isLastRow)  return { top: BNONE,   bottom: BTHICK,  left: BNONE, right: BNONE };
+    return { top: BNONE, bottom: BNONE, left: BNONE, right: BNONE };
+  }
+
+  const tableRows = allRows.map((row, rowIdx) => {
+    const isHeader  = headers.length > 0 && rowIdx === 0;
+    const isLastRow = rowIdx === allRows.length - 1;
+    const cells = Array.from({ length: colCount }, (_, colIdx) => {
+      const cellText = String(row[colIdx] ?? "");
+      return new TableCell({
+        width  : { size: colWidths[colIdx], type: WidthType.DXA },
+        borders: getCellBorders(isHeader, isLastRow),
+        shading: isHeader ? { fill: "F2F2F2", type: ShadingType.CLEAR } : undefined,
+        children: [new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children : [cnRun({ text: cellText, cnFont, sizePt: bodySizePt, bold: isHeader })],
+        })],
+      });
+    });
+    return new TableRow({ tableHeader: isHeader, children: cells });
+  });
+
+  items.push(new Table({
+    width      : { size: usableDxa, type: WidthType.DXA },
+    columnWidths: colWidths,
+    margins    : { top: 80, bottom: 80, left: 100, right: 100 },
+    rows       : tableRows,
+  }));
+
+  // 表格后间距
+  items.push(makePara({
+    runs     : [],
+    spaceAfter: lineSpacingFixed ? Math.round(lineSpacingFixed * 10) : 80,
+    lineSpacingFixed,
+    lineSpacingMultiple,
+  }));
+
+  return items;
+}
+
+// ─────────────────────────────────────────────
+// Phase 1：图片渲染
+// ─────────────────────────────────────────────
+
+function renderImage(node, ctx) {
+  const { usableDxa, bodySizePt, cnFont, lineSpacingFixed, lineSpacingMultiple } = ctx;
+  const { src, width: widthMm, height: heightMm, caption, align = "center" } = node;
+  const items = [];
+
+  if (!src) return items;
+
+  let imgBuf;
+  try {
+    imgBuf = fs.readFileSync(src);
+  } catch {
+    items.push(makePara({
+      runs: [cnRun({ text: `[图片加载失败：${src}]`, cnFont, sizePt: bodySizePt, color: "888888" })],
+    }));
+    return items;
+  }
+
+  const usableMm  = usableDxa * 25.4 / 1440;  // 可用宽度（mm）
+  const PX_PER_MM = 96 / 25.4;                 // 96 DPI
+  const dims      = getImageDimensions(imgBuf);
+
+  let displayW, displayH;
+  if (widthMm) {
+    const actualMm = Math.min(widthMm, usableMm);
+    displayW = Math.round(actualMm * PX_PER_MM);
+    displayH = heightMm
+      ? Math.round(heightMm * PX_PER_MM)
+      : dims ? Math.round(displayW * dims.h / dims.w) : Math.round(displayW * 0.75);
+  } else if (dims) {
+    const naturalMm = dims.w / PX_PER_MM;
+    const finalMm   = Math.min(naturalMm, usableMm);
+    displayW = Math.round(finalMm * PX_PER_MM);
+    displayH = Math.round(displayW * dims.h / dims.w);
+  } else {
+    displayW = Math.round(usableMm * 0.7 * PX_PER_MM);
+    displayH = Math.round(displayW * 0.75);
+  }
+
+  const ext   = path.extname(src).toLowerCase().slice(1);
+  const itype = { jpg: "jpg", jpeg: "jpg", png: "png", gif: "gif", bmp: "bmp" }[ext] || "png";
+  const al    = { center: AlignmentType.CENTER, left: AlignmentType.LEFT, right: AlignmentType.RIGHT }[align]
+                ?? AlignmentType.CENTER;
+
+  items.push(new Paragraph({
+    alignment: al,
+    spacing  : { before: 80, after: 40 },
+    children : [new ImageRun({ data: imgBuf, transformation: { width: displayW, height: displayH }, type: itype })],
+  }));
+
+  if (caption) {
+    items.push(makePara({
+      runs: [cnRun({ text: caption, cnFont, sizePt: bodySizePt - 1 })],
+      alignment: AlignmentType.CENTER,
+      spaceAfter: 80,
+      lineSpacingFixed,
+      lineSpacingMultiple,
+    }));
+  }
+
+  return items;
+}
+
+// ─────────────────────────────────────────────
+// Phase 1：列表渲染（有序 / 无序，最多 3 级嵌套）
+// ─────────────────────────────────────────────
+
+function renderList(node, ctx) {
+  const { bodySizePt, cnFont, lineSpacingFixed, lineSpacingMultiple } = ctx;
+  const { ordered = false, items = [] } = node;
+  const ref = ordered ? "cn-numbered" : "cn-bullet";
+  const paras = [];
+
+  function renderItems(itemList, depth) {
+    for (const item of itemList) {
+      const spacing = {};
+      if (lineSpacingFixed) {
+        spacing.line     = Math.round(lineSpacingFixed * 20);
+        spacing.lineRule = "exact";
+      } else if (lineSpacingMultiple) {
+        spacing.line     = Math.round(lineSpacingMultiple * 240);
+        spacing.lineRule = "auto";
+      }
+      paras.push(new Paragraph({
+        numbering: { reference: ref, level: depth },
+        children : [cnRun({ text: item.text || "", cnFont, sizePt: bodySizePt })],
+        spacing,
+      }));
+      if (item.children && item.children.length > 0) {
+        renderItems(item.children, depth + 1);
+      }
+    }
+  }
+
+  renderItems(items, 0);
+  return paras;
+}
+
+// ─────────────────────────────────────────────
+// Phase 1：文档级列表编号配置（供 Document 构造函数使用）
+// ─────────────────────────────────────────────
+
+function makeNumberingConfig(bodySizePt, cnFont) {
+  const makeLevels = (isBullet) =>
+    [0, 1, 2].map(lvl => ({
+      level : lvl,
+      format: isBullet ? LevelFormat.BULLET : LevelFormat.DECIMAL,
+      text  : isBullet ? "\u2022" : `%${lvl + 1}.`,
+      alignment: AlignmentType.LEFT,
+      style: {
+        run      : { font: { name: cnFont, eastAsia: cnFont }, size: bodySizePt * 2 },
+        paragraph: { indent: { left: 360 + 360 * lvl, hanging: 260 } },
+      },
+    }));
+  return [
+    { reference: "cn-bullet",   levels: makeLevels(true)  },
+    { reference: "cn-numbered", levels: makeLevels(false) },
+  ];
+}
+
+// ─────────────────────────────────────────────
+// Phase 2：分页符
+// ─────────────────────────────────────────────
+
+function renderPageBreak() {
+  return [new Paragraph({ pageBreakBefore: true, children: [] })];
+}
+
+// ─────────────────────────────────────────────
+// Phase 2：水平分割线
+// ─────────────────────────────────────────────
+
+function renderDivider() {
+  return [new Paragraph({
+    spacing: { before: 80, after: 80 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "AAAAAA", space: 1 } },
+    children: [],
+  })];
+}
+
+// ─────────────────────────────────────────────
+// Phase 2：超链接段落
+// node: { type:"link", text, url, prefix?, suffix? }
+// ─────────────────────────────────────────────
+
+function renderLink(node, ctx) {
+  const { bodySizePt, cnFont, lineSpacingFixed, lineSpacingMultiple } = ctx;
+  const { text = "", url = "", prefix = "", suffix = "" } = node;
+
+  const children = [];
+  if (prefix) children.push(cnRun({ text: prefix, cnFont, sizePt: bodySizePt }));
+  children.push(new ExternalHyperlink({
+    link: url,
+    children: [new TextRun({
+      text,
+      style: "Hyperlink",
+      font: { name: cnFont, eastAsia: cnFont, cs: cnFont },
+      size: bodySizePt * 2,
+    })],
+  }));
+  if (suffix) children.push(cnRun({ text: suffix, cnFont, sizePt: bodySizePt }));
+
+  const spacing = {};
+  if (lineSpacingFixed)    { spacing.line = Math.round(lineSpacingFixed * 20); spacing.lineRule = "exact"; }
+  else if (lineSpacingMultiple) { spacing.line = Math.round(lineSpacingMultiple * 240); spacing.lineRule = "auto"; }
+
+  return [new Paragraph({ children, spacing })];
+}
+
+// ─────────────────────────────────────────────
+// Phase 2：自定义页眉（仅 general 模式）
+// ─────────────────────────────────────────────
+
+function makeHeaders(headerText, headerOdd, headerEven, bodySizePt, cnFont) {
+  const odd  = headerOdd  || headerText || "";
+  const even = headerEven || headerText || "";
+  if (!odd && !even) return null;
+
+  const makeHeaderPara = (text) => new Paragraph({
+    alignment: AlignmentType.CENTER,
+    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "AAAAAA", space: 1 } },
+    spacing: { after: 0 },
+    children: [cnRun({ text, cnFont, sizePt: Math.max(bodySizePt - 2, 10) })],
+  });
+
+  if (headerOdd || headerEven) {
+    // 奇偶页不同
+    return {
+      default: new Header({ children: [makeHeaderPara(odd)] }),
+      even   : new Header({ children: [makeHeaderPara(even)] }),
+    };
+  }
+  return {
+    default: new Header({ children: [makeHeaderPara(odd)] }),
+  };
+}
+
+// ─────────────────────────────────────────────
+// Markdown 预处理：将 MD 字符串转为 body 节点数组
+// 支持：标题(#~###)、表格、无序/有序列表、段落、代码块、引用块
+// 行内格式（**bold** *italic* `code` [link]()）统一剥除为纯文本
+// ─────────────────────────────────────────────
+
+function stripInlineMarkdown(text) {
+  return text
+    .replace(/\*\*\*(.+?)\*\*\*/g, "$1")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/\[(.+?)\]\([^)]*\)/g, "$1")
+    .trim();
+}
+
+function parseMarkdownTableLines(lines) {
+  const isSep = l => /^\|[\s\-:|]+\|$/.test(l.trim());
+  const parseRow = l =>
+    l.trim().replace(/^\||\|$/g, "").split("|")
+      .map(c => stripInlineMarkdown(c.trim()));
+
+  const contentLines = lines.filter(l => !isSep(l));
+  if (contentLines.length === 0) return null;
+
+  const allRows = contentLines.map(parseRow);
+  const hasHeader = lines.length > 1 && isSep(lines[1]);
+
+  if (hasHeader) {
+    return { type: "table", headers: allRows[0], rows: allRows.slice(1), style: "three-line" };
+  }
+  return { type: "table", rows: allRows, style: "three-line" };
+}
+
+function parseMarkdownListBlock(lines, startI) {
+  const firstLine = lines[startI];
+  const ordered = /^\s*\d+[.)]\s/.test(firstLine);
+  const listRe = /^(\s*)([-*+]|\d+[.)])\s+(.*)/;
+  const baseIndent = (firstLine.match(/^(\s*)/) || ["", ""])[1].length;
+
+  function collectLevel(i, minIndent) {
+    const items = [];
+    while (i < lines.length) {
+      const line = lines[i];
+      if (!line.trim()) { i++; break; }
+      const m = line.match(listRe);
+      if (!m) break;
+      const indent = m[1].length;
+      if (indent < minIndent) break;
+      if (indent > minIndent) break; // child — handled by parent
+
+      const item = { text: stripInlineMarkdown(m[3]) };
+      i++;
+
+      // Check next lines for children (deeper indent)
+      if (i < lines.length) {
+        const nm = lines[i].match(listRe);
+        if (nm && nm[1].length > indent) {
+          const { items: children, newI } = collectLevel(i, nm[1].length);
+          if (children.length > 0) item.children = children;
+          i = newI;
+        }
+      }
+      items.push(item);
+    }
+    return { items, newI: i };
+  }
+
+  const { items, newI } = collectLevel(startI, baseIndent);
+  return { node: { type: "list", ordered, items }, newI };
+}
+
+function parseMarkdown(md) {
+  const lines = md.split("\n");
+  const body  = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line    = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) { i++; continue; }
+
+    // ATX 标题 #~######
+    const hm = trimmed.match(/^(#{1,6})\s+(.+?)(?:\s+#+)?$/);
+    if (hm) {
+      const depth = hm[1].length;
+      const text  = stripInlineMarkdown(hm[2]);
+      if (depth <= 3) {
+        body.push({ level: depth, heading: text });
+      } else {
+        body.push({ level: 0, text });   // h4-h6 降级为正文段落
+      }
+      i++; continue;
+    }
+
+    // 水平分隔线
+    if (/^[-*_]{3,}$/.test(trimmed)) { i++; continue; }
+
+    // 代码块 ``` 或 ~~~
+    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+      const fence = trimmed.slice(0, 3);
+      i++;
+      const codeLines = [];
+      while (i < lines.length && !lines[i].trim().startsWith(fence)) {
+        codeLines.push(lines[i]); i++;
+      }
+      i++; // 跳过闭合 fence
+      if (codeLines.length > 0) {
+        body.push({ level: 0, text: codeLines.join("\n") });
+      }
+      continue;
+    }
+
+    // 引用块 >
+    if (trimmed.startsWith(">")) {
+      const qLines = [];
+      while (i < lines.length && lines[i].trim().startsWith(">")) {
+        qLines.push(lines[i].trim().replace(/^>\s?/, "")); i++;
+      }
+      body.push({ level: 0, text: stripInlineMarkdown(qLines.join(" ")) });
+      continue;
+    }
+
+    // 表格 |...|
+    if (trimmed.startsWith("|")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) {
+        tableLines.push(lines[i]); i++;
+      }
+      const tnode = parseMarkdownTableLines(tableLines);
+      if (tnode) body.push(tnode);
+      continue;
+    }
+
+    // 列表（无序 / 有序）
+    if (/^[-*+]\s/.test(trimmed) || /^\d+[.)]\s/.test(trimmed)) {
+      const { node, newI } = parseMarkdownListBlock(lines, i);
+      body.push(node);
+      i = newI;
+      continue;
+    }
+
+    // 普通段落：合并到空行或结构元素为止
+    const paraLines = [];
+    while (i < lines.length) {
+      const l = lines[i], t = l.trim();
+      if (!t) break;
+      if (/^#{1,6}\s/.test(t) || t.startsWith("|") ||
+          t.startsWith("```") || t.startsWith("~~~") ||
+          /^[-*+]\s/.test(t) || /^\d+[.)]\s/.test(t) ||
+          /^[-*_]{3,}$/.test(t)) break;
+      paraLines.push(l); i++;
+    }
+    if (paraLines.length > 0) {
+      body.push({ level: 0, text: stripInlineMarkdown(paraLines.join(" ")) });
+    }
+  }
+
+  return body;
+}
+
+// ─────────────────────────────────────────────
 // 正文渲染（公文模式）
 // ─────────────────────────────────────────────
 
-function renderBodyOfficial(body, bodyFont, lineSpacingFixed, isStandard) {
+function renderBodyOfficial(body, bodyFont, lineSpacingFixed, isStandard, ctx) {
   const INDENT = PT(32);  // 首行缩进两字（三号16pt×2=32pt）
   const paras = [];
   // standard 模式下二级标题用宋体加粗；strict 模式用楷体
@@ -223,6 +760,14 @@ function renderBodyOfficial(body, bodyFont, lineSpacingFixed, isStandard) {
   const h2Bold = isStandard;
 
   for (const node of body) {
+    if (ctx) {
+      if (node.type === "table")     { paras.push(...renderTable(node, ctx));  continue; }
+      if (node.type === "image")     { paras.push(...renderImage(node, ctx));  continue; }
+      if (node.type === "list")      { paras.push(...renderList(node, ctx));   continue; }
+      if (node.type === "pageBreak") { paras.push(...renderPageBreak());        continue; }
+      if (node.type === "divider")   { paras.push(...renderDivider());          continue; }
+      if (node.type === "link")      { paras.push(...renderLink(node, ctx));   continue; }
+    }
     const { level = 0, number = "", heading, text = "" } = node;
 
     if (level === 0) {
@@ -282,12 +827,25 @@ function renderBodyOfficial(body, bodyFont, lineSpacingFixed, isStandard) {
 // 正文渲染（通用文档模式）
 // ─────────────────────────────────────────────
 
-function renderBodyGeneral(body, layout) {
-  const { h1SizePt, h2SizePt, h3SizePt, bodySizePt, lineSpacingMultiple } = layout;
+function renderBodyGeneral(body, layout, ctx) {
+  const { h1SizePt, h2SizePt, h3SizePt, bodySizePt } = layout;
+  // ctx 中的 lineSpacingMultiple 已合并 preset 覆盖
+  const lineSpacingMultiple = (ctx && ctx.lineSpacingMultiple) || layout.lineSpacingMultiple;
+  const h1Font  = (ctx && ctx.h1Font)  || F.heiti;
+  const h1Color = (ctx && ctx.h1Color) || undefined;
+  const h2Color = (ctx && ctx.h2Color) || undefined;
   const INDENT = bodySizePt * 2 * 20;  // 首行缩进两字
   const paras = [];
 
   for (const node of body) {
+    if (ctx) {
+      if (node.type === "table")     { paras.push(...renderTable(node, ctx));  continue; }
+      if (node.type === "image")     { paras.push(...renderImage(node, ctx));  continue; }
+      if (node.type === "list")      { paras.push(...renderList(node, ctx));   continue; }
+      if (node.type === "pageBreak") { paras.push(...renderPageBreak());        continue; }
+      if (node.type === "divider")   { paras.push(...renderDivider());          continue; }
+      if (node.type === "link")      { paras.push(...renderLink(node, ctx));   continue; }
+    }
     const { level = 0, number = "", heading, text = "" } = node;
 
     if (level === 0) {
@@ -297,9 +855,9 @@ function renderBodyGeneral(body, layout) {
         lineSpacingMultiple,
       }));
     } else if (level === 1) {
-      // 一级标题：黑体小三，独立成行，段前段后间距（黑体本身已足够醒目，不另加粗）
+      // 一级标题：黑体小三（可被 preset 覆盖字体/颜色），独立成行，段前段后间距
       paras.push(makePara({
-        runs: [cnRun({ text: joinNumberHeading(number, heading, "、"), cnFont: F.heiti, sizePt: h1SizePt })],
+        runs: [cnRun({ text: joinNumberHeading(number, heading, "、"), cnFont: h1Font, sizePt: h1SizePt, color: h1Color })],
         spaceBefore: PT(7),
         spaceAfter : PT(4),
         lineSpacingMultiple,
@@ -310,9 +868,9 @@ function renderBodyGeneral(body, layout) {
         lineSpacingMultiple,
       }));
     } else if (level === 2) {
-      // 二级标题：宋体四号加粗
+      // 二级标题：宋体四号加粗（可被 preset 覆盖颜色）
       paras.push(makePara({
-        runs: [cnRun({ text: heading ? `${number}${heading}` : number, cnFont: F.songti, sizePt: h2SizePt, bold: true })],
+        runs: [cnRun({ text: heading ? `${number}${heading}` : number, cnFont: F.songti, sizePt: h2SizePt, bold: true, color: h2Color })],
         firstLineIndentTwips: INDENT,
         spaceBefore: PT(4),
         spaceAfter : PT(2),
@@ -407,12 +965,31 @@ function renderBanji({ cc = "", printOrg = "", printDate = "", bodyFont }) {
 // 主生成函数
 // ─────────────────────────────────────────────
 
-async function generate({ mode = "official", style = "standard", docType = "baogao",
-                           content = {}, outputPath = "output.docx" }) {
+async function generate(opts = {}) {
+  const { docType = "baogao", content = {}, outputPath = "output.docx",
+          preset = null } = opts;
+
+  // preset 提供 mode/style 默认值，显式传参优先
+  const pd   = preset ? (PRESETS[preset] || {}) : {};
+  const mode  = opts.mode  ?? pd.mode  ?? "official";
+  const style = opts.style ?? pd.style ?? "standard";
 
   const layout = mode === "general" ? LAYOUT.general : LAYOUT.official;
-  const { margin, titleSizePt, bodySizePt, footerStyle } = layout;
+  // preset 可覆盖行距和页边距
+  const mergedLineSpacingMultiple = pd.lineSpacingMultiple ?? layout.lineSpacingMultiple ?? null;
+  const mergedMargin              = pd.marginOverride      ?? layout.margin;
+  const { titleSizePt, bodySizePt, footerStyle } = layout;
+  const margin = mergedMargin;
   const lineSpacingFixed = layout.lineSpacingFixed || null;
+
+  // preset 外观参数（颜色/字体，仅影响 general 模式标题）
+  const ps = {
+    titleFont : pd.titleFont  || null,
+    h1Font    : pd.h1Font     || null,
+    titleColor: pd.titleColor || null,
+    h1Color   : pd.h1Color    || null,
+    h2Color   : pd.h2Color    || null,
+  };
 
   // 公文模式字体选择
   const isStrict = (mode === "official" && style === "strict");
@@ -424,7 +1001,7 @@ async function generate({ mode = "official", style = "standard", docType = "baog
   const bodyFont  = isStrict ? F.fangsong : F.songti;
   const titleBold = isOfficial && !isStrict;  // 仅 official standard 宋体标题加粗；general 黑体 / strict 方正小标宋均不需要
 
-  const { title = "", recipient = "", body = [],
+  const { title = "", recipient = "",
           org = "", date = "", doc_number = "", attachments = [],
           // strict 模式新增字段
           serial_number = "",   // 份号（6位数字）
@@ -434,7 +1011,14 @@ async function generate({ mode = "official", style = "standard", docType = "baog
           cc = "",              // 抄送机关
           print_org = "",       // 印发机关
           print_date = "",      // 印发日期
+          // Phase 2：页眉（仅 general 模式有效）
+          header = "",          // 统一页眉文字
+          headerOdd = "",       // 奇数页页眉（优先于 header）
+          headerEven = "",      // 偶数页页眉（优先于 header）
   } = content;
+
+  // content.markdown 优先：将 Markdown 字符串解析为 body 节点
+  const body = content.markdown ? parseMarkdown(content.markdown) : (content.body || []);
 
   // 日期处理
   let dateStr;
@@ -569,8 +1153,10 @@ async function generate({ mode = "official", style = "standard", docType = "baog
       spaceAfter : isStrict ? Math.round(LINE_HEIGHT_PT * 20) : PT(12), // strict: 标题后空一行到主送机关
       lineSpacingFixed: officialLS,
       lineSpacingMultiple: generalLS,
-      runs: [cnRun({ text: title, cnFont: mode === "general" ? F.heiti : titleFont,
-                     sizePt: titleSizePt, bold: titleBold })],
+      runs: [cnRun({ text: title,
+                     cnFont: mode === "general" ? (ps.titleFont || F.heiti) : titleFont,
+                     sizePt: titleSizePt, bold: titleBold,
+                     color: mode === "general" ? (ps.titleColor || undefined) : undefined })],
     }));
   }
 
@@ -579,7 +1165,7 @@ async function generate({ mode = "official", style = "standard", docType = "baog
     children.push(makePara({
       alignment: AlignmentType.CENTER,
       spaceAfter: PT(6),
-      lineSpacingMultiple: layout.lineSpacingMultiple,
+      lineSpacingMultiple: mergedLineSpacingMultiple,
       runs: [cnRun({ text: content.author, cnFont: F.songti, sizePt: bodySizePt })],
     }));
   }
@@ -595,10 +1181,22 @@ async function generate({ mode = "official", style = "standard", docType = "baog
   }
 
   // ── 正文 ──
+  const usableDxa = USABLE_DXA[mode === "general" ? "general" : "official"];
+  const ctx = {
+    usableDxa,
+    bodySizePt,
+    cnFont: bodyFont,
+    lineSpacingFixed: officialLS,
+    lineSpacingMultiple: mode === "general" ? mergedLineSpacingMultiple : null,
+    // Phase 3: preset 外观
+    h1Font    : ps.h1Font,
+    h1Color   : ps.h1Color,
+    h2Color   : ps.h2Color,
+  };
   if (mode === "general") {
-    children.push(...renderBodyGeneral(body, layout));
+    children.push(...renderBodyGeneral(body, layout, ctx));
   } else {
-    children.push(...renderBodyOfficial(body, bodyFont, officialLS, isStandard));
+    children.push(...renderBodyOfficial(body, bodyFont, officialLS, isStandard, ctx));
   }
 
   // ── 附件说明 ──
@@ -699,8 +1297,14 @@ async function generate({ mode = "official", style = "standard", docType = "baog
 
   // ── 构建文档 ──
   const footers = makeFooters(footerStyle);
+  // 页眉仅在 general 模式下生效（公文模式无页眉，符合 GB/T 9704 规范）
+  const headers = (!isOfficial && (header || headerOdd || headerEven))
+    ? makeHeaders(header, headerOdd, headerEven, bodySizePt, bodyFont)
+    : null;
+  const hasEvenOdd = footerStyle === "chinese" || !!(headerOdd || headerEven);
   const doc = new Document({
-    evenAndOddHeaderAndFooters: footerStyle === "chinese", // 启用奇偶页页脚区分
+    evenAndOddHeaderAndFooters: hasEvenOdd,
+    numbering: { config: makeNumberingConfig(bodySizePt, bodyFont) },
     styles: {
       default: {
         document: {
@@ -716,6 +1320,7 @@ async function generate({ mode = "official", style = "standard", docType = "baog
           margin,
         },
       },
+      ...(headers ? { headers } : {}),
       footers,
       children,
     }],
@@ -725,7 +1330,50 @@ async function generate({ mode = "official", style = "standard", docType = "baog
   const outDir = path.dirname(outputPath);
   if (outDir && outDir !== ".") fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(outputPath, buffer);
-  return outputPath;
+
+  // ── Phase 4：生成报告 ──
+  return { path: outputPath, stats: calcStats(body, mode) };
+}
+
+// ─────────────────────────────────────────────
+// Phase 4：生成统计报告
+// ─────────────────────────────────────────────
+
+function calcStats(body, mode) {
+  let chars = 0, tables = 0, images = 0, lists = 0, paras = 0;
+
+  function countChars(s) { chars += (s || "").replace(/\s/g, "").length; }
+
+  function walkItems(items) {
+    for (const item of (items || [])) {
+      countChars(item.text);
+      walkItems(item.children);
+    }
+  }
+
+  for (const node of (body || [])) {
+    if (!node) continue;
+    switch (node.type) {
+      case "table":
+        tables++;
+        (node.headers || []).forEach(countChars);
+        (node.rows    || []).forEach(r => r.forEach(countChars));
+        break;
+      case "image":  images++; break;
+      case "list":   lists++;  walkItems(node.items); break;
+      case "link":   countChars(node.prefix); countChars(node.text); countChars(node.suffix); break;
+      case "pageBreak": case "divider": break;
+      default:
+        paras++;
+        countChars(node.text); countChars(node.heading);
+    }
+  }
+
+  // 每页字符估算：公文 ~600，通用 ~700
+  const charsPerPage = mode === "official" ? 600 : 700;
+  const pages = Math.max(1, Math.ceil(chars / charsPerPage));
+
+  return { chars, pages, tables, images, lists, paras };
 }
 
 // ─────────────────────────────────────────────
@@ -749,7 +1397,10 @@ if (require.main === module) {
       try { opts = JSON.parse(raw); }
       catch (e) { console.error("❌ JSON 解析失败：" + e.message); process.exit(1); }
       generate(opts)
-        .then(out => console.log("✅ 已生成：" + out))
+        .then(({ path: p, stats: s }) => {
+          console.log(`✅ 已生成：${p}`);
+          console.log(`   📄 估算约 ${s.pages} 页  ·  段落 ${s.paras}  ·  表格 ${s.tables}  ·  图片 ${s.images}  ·  列表 ${s.lists}  ·  字符 ${s.chars}`);
+        })
         .catch(e  => { console.error("❌ 失败：" + e.message); process.exit(1); });
     });
     return;
@@ -777,6 +1428,8 @@ if (require.main === module) {
         { level: 0, text: "下一步，将重点做好以下几方面工作：一是加强学习，提升业务能力；二是主动作为，提高工作效率；三是强化协作，形成工作合力。" },
       ],
     },
-  }).then(out => console.log("✅ 已生成：" + out))
-    .catch(e  => { console.error("❌ 失败：", e.message); process.exit(1); });
+  }).then(({ path: p, stats: s }) => {
+    console.log(`✅ 已生成：${p}`);
+    console.log(`   📄 估算约 ${s.pages} 页  ·  段落 ${s.paras}  ·  表格 ${s.tables}  ·  图片 ${s.images}  ·  列表 ${s.lists}  ·  字符 ${s.chars}`);
+  }).catch(e  => { console.error("❌ 失败：", e.message); process.exit(1); });
 }

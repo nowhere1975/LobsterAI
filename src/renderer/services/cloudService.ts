@@ -9,11 +9,28 @@ import { configService } from './config';
 import { ChatMessagePayload, ChatUserMessageInput } from '../types/chat';
 
 const CREDITS_SYNC_INTERVAL = 5 * 60 * 1000; // 5 分钟同步一次
+const CHAT_SERVER_URL = 'http://1.14.96.63:3000'; // LLM relay，写死，不读配置
+const USER_SERVER_URL = 'https://udiskai.top/api'; // 用户管理（注册/积分/充值），写死，nginx /api/ → port 8888
 
 class CloudService {
   private syncTimer: ReturnType<typeof setInterval> | null = null;
   private unsubWindowState: (() => void) | null = null;
   private lastFocusRefreshTime = 0;
+  private creditsExhaustedListeners: Array<() => void> = [];
+
+  /** 注册积分耗尽回调，用于 UI 层弹出充值提示 */
+  onCreditsExhausted(listener: () => void): () => void {
+    this.creditsExhaustedListeners.push(listener);
+    return () => {
+      this.creditsExhaustedListeners = this.creditsExhaustedListeners.filter(l => l !== listener);
+    };
+  }
+
+  private notifyCreditsExhausted() {
+    for (const listener of this.creditsExhaustedListeners) {
+      try { listener(); } catch { /* ignore */ }
+    }
+  }
 
   // ── 初始化 ──────────────────────────────────────────────────────────────
 
@@ -46,7 +63,7 @@ class CloudService {
     const deviceId = await this.getOrCreateDeviceId();
 
     try {
-      const res = await fetch(`${cfg.serverUrl}/auth/register`, {
+      const res = await fetch(`${cfg.userServerUrl}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId }),
@@ -70,7 +87,7 @@ class CloudService {
     const deviceId = await this.getOrCreateDeviceId();
 
     try {
-      const res = await fetch(`${cfg.serverUrl}/credits?deviceId=${encodeURIComponent(deviceId)}`);
+      const res = await fetch(`${cfg.userServerUrl}/credits?deviceId=${encodeURIComponent(deviceId)}`);
       if (res.status === 404) {
         // 设备不存在，重新注册
         return await this.ensureRegistered();
@@ -140,7 +157,7 @@ class CloudService {
       stream: true,
     });
 
-    const res = await fetch(`${cfg.serverUrl}/chat`, {
+    const res = await fetch(`${cfg.chatServerUrl}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
@@ -177,6 +194,9 @@ class CloudService {
           // 余额更新
           if (parsed.credits_remaining !== undefined) {
             await this.updateCachedCredits(parsed.credits_remaining);
+            if (parsed.credits_remaining <= 0) {
+              this.notifyCreditsExhausted();
+            }
           }
           const delta = parsed.choices?.[0]?.delta?.content;
           if (delta) {
@@ -202,7 +222,7 @@ class CloudService {
     const cfg = this.getCloudConfig();
     const deviceId = await this.getOrCreateDeviceId();
 
-    const res = await fetch(`${cfg.serverUrl}/pay/create`, {
+    const res = await fetch(`${cfg.userServerUrl}/pay/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId, packageId, customAmount }),
@@ -216,7 +236,7 @@ class CloudService {
 
   async pollPayStatus(orderId: string): Promise<'pending' | 'paid'> {
     const cfg = this.getCloudConfig();
-    const res = await fetch(`${cfg.serverUrl}/pay/status?orderId=${encodeURIComponent(orderId)}`);
+    const res = await fetch(`${cfg.userServerUrl}/pay/status?orderId=${encodeURIComponent(orderId)}`);
     if (!res.ok) throw new Error(`pay/status failed: ${res.status}`);
     const data = await res.json();
     if (data.status === 'paid' && data.credits !== undefined) {
@@ -251,13 +271,10 @@ class CloudService {
 
   private getCloudConfig() {
     const config = configService.getConfig();
-    return config.cloud ?? {
-      enabled: false,
-      deviceId: '',
-      credits: 0,
-      lastSyncAt: 0,
-      serverUrl: 'http://1.14.96.63:3000',
-    };
+    const cloud = config.cloud ?? { enabled: false, deviceId: '', credits: 0, lastSyncAt: 0 };
+    // chatServerUrl → LLM relay (also used by claudeSettings.ts as baseURL)
+    // userServerUrl → user management (auth, credits, payment)
+    return { ...cloud, serverUrl: CHAT_SERVER_URL, chatServerUrl: CHAT_SERVER_URL, userServerUrl: USER_SERVER_URL };
   }
 
   private async updateCachedCredits(credits: number) {
