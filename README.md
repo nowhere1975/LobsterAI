@@ -38,10 +38,10 @@
 
 ### 下载使用
 
-1. 从 [Releases](../../releases) 页面下载最新的 `AI助手-portable-win.zip`
+1. 从 [Releases](../../releases) 页面下载最新的 `UdiskAIxxx.zip`
 2. 解压到任意目录（建议路径不含中文和空格）
 3. **直接双击 `UdiskAI.exe`** 启动，程序自动识别便携模式
-4. 在设置页面填入 API Key，即可开始使用
+4. 在设置页面领取积分 或 填入 API Key，即可开始使用
 
 ### 目录结构
 
@@ -74,7 +74,6 @@ UdiskAI/
 | web-search | 实时网页搜索，获取最新信息 |
 | imap-smtp-email | 通过 IMAP/SMTP 收发邮件，支持 Gmail、Outlook、163 等 |
 | local-tools | 本地日历管理（Windows） |
-| weather | 天气查询（无需 API Key） |
 | create-plan | 任务规划与拆解 |
 
 还可以从**技能市场**一键安装更多社区技能。
@@ -85,14 +84,14 @@ UdiskAI/
 
 - MiniMax
 - 月之暗面 Kimi
-- 阿里云通义千问
 - 智谱 GLM
 - 火山引擎
 - Anthropic Claude
 - OpenAI
 - Gemini
 - OpenRouter
-- 及其他 OpenAI 兼容接口
+- 自定义服务商（BaseURL+APIKey）
+- 本地大模型
 
 ## Cowork 智能体模式
 
