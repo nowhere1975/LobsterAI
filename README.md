@@ -156,6 +156,10 @@ npm run electron:dev
 - **内容安全**：HTML iframe sandbox，DOMPurify 过滤，Mermaid strict 模式
 - **数据隔离**：文件操作限制在指定工作目录内
 
+## 官网
+
+**https://udiskai.top**
+
 ## 反馈与联系
 
 使用问题或建议：**UdiskAI@163.com**
