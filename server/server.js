@@ -441,7 +441,13 @@ if (SERVER_ROLE === 'llm') {
         agent: false,
       }, dsRes => {
         console.log('[v1/messages/stream] upstream status:', dsRes.statusCode);
-        dsRes.on('error', err => console.error('[v1/messages/stream] dsRes error:', err.message));
+        dsRes.on('error', err => {
+          console.error('[v1/messages/stream] upstream response stream error:', err.message);
+          if (!res.writableEnded) {
+            res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'api_error', message: 'Upstream stream interrupted' } })}\n\n`);
+            res.end();
+          }
+        });
 
         if (dsRes.statusCode !== 200) {
           let errBody = '';
@@ -463,7 +469,7 @@ if (SERVER_ROLE === 'llm') {
         // State for converting OpenAI streaming tool_calls → Anthropic content_block events
         let textBlockStarted = false;
         let textBlockIndex = 0;
-        // toolBlocks[openaiIndex] = { anthropicIndex, id, name, started }
+        // toolBlocks[openaiIndex] = { anthropicIndex, id, name, started, hasArgs }
         const toolBlocks = {};
         let nextBlockIndex = 0;
         let finalStopReason = 'end_turn';
@@ -504,10 +510,11 @@ if (SERVER_ROLE === 'llm') {
                 if (!toolBlocks[i]) {
                   // First chunk for this tool call: has id and name
                   const bIdx = nextBlockIndex++;
-                  toolBlocks[i] = { anthropicIndex: bIdx, id: tc.id || `toolu_${i}`, name: tc.function?.name || '', started: true };
+                  toolBlocks[i] = { anthropicIndex: bIdx, id: tc.id || `toolu_${i}`, name: tc.function?.name || '', started: true, hasArgs: false };
                   res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: bIdx, content_block: { type: 'tool_use', id: toolBlocks[i].id, name: toolBlocks[i].name, input: {} } })}\n\n`);
                 }
                 if (tc.function?.arguments) {
+                  toolBlocks[i].hasArgs = true;
                   res.write(`event: content_block_delta\ndata: ${JSON.stringify({ type: 'content_block_delta', index: toolBlocks[i].anthropicIndex, delta: { type: 'input_json_delta', partial_json: tc.function.arguments } })}\n\n`);
                 }
               }
@@ -521,6 +528,12 @@ if (SERVER_ROLE === 'llm') {
           // DeepSeek may send finish_reason: 'stop' even when making tool calls;
           // force tool_use if we collected any tool blocks
           if (Object.keys(toolBlocks).length > 0) finalStopReason = 'tool_use';
+          // Warn if any tool block received no argument deltas — likely a model issue
+          for (const tb of Object.values(toolBlocks)) {
+            if (!tb.hasArgs) {
+              console.warn(`[v1/messages/stream] tool call "${tb.name}" (${tb.id}) received no argument deltas — model may have generated empty params`);
+            }
+          }
           // Close all open blocks
           if (textBlockStarted) {
             res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: textBlockIndex })}\n\n`);
