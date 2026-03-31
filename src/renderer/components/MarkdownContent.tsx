@@ -239,14 +239,14 @@ const CodeBlock: React.FC<any> = ({ node, className, children, ...props }) => {
             <button
               type="button"
               onClick={handleCopy}
-              className="absolute top-2 right-2 z-10 p-1.5 rounded-md bg-gray-700/80 text-gray-300 hover:bg-gray-600 transition-colors opacity-0 group-hover:opacity-100"
+              className="absolute top-2 right-2 z-10 p-2 rounded-md bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors opacity-0 group-hover:opacity-100 transform-gpu"
               title={i18nService.t('copyToClipboard')}
               aria-label={i18nService.t('copyToClipboard')}
             >
               {isCopied ? (
-                <CheckIcon className="h-4 w-4 text-green-500" />
+                <CheckIcon className="h-5 w-5 text-green-500" />
               ) : (
-                <ClipboardDocumentIcon className="h-4 w-4" />
+                <ClipboardDocumentIcon className="h-5 w-5" />
               )}
             </button>
             <code className="block px-4 py-3 font-mono dark:text-gray-100 text-gray-800 whitespace-pre">
@@ -265,14 +265,14 @@ const CodeBlock: React.FC<any> = ({ node, className, children, ...props }) => {
           <button
             type="button"
             onClick={handleCopy}
-            className="p-1.5 rounded-md dark:hover:bg-claude-darkSurfaceHover hover:bg-claude-surfaceHover transition-colors"
+            className="p-2 rounded-md dark:hover:bg-claude-darkSurfaceHover hover:bg-claude-surfaceHover transition-colors transform-gpu"
             title={i18nService.t('copyToClipboard')}
             aria-label={i18nService.t('copyToClipboard')}
           >
             {isCopied ? (
-              <CheckIcon className="h-4 w-4 text-green-500" />
+              <CheckIcon className="h-5 w-5 text-green-500" />
             ) : (
-              <ClipboardDocumentIcon className="h-4 w-4" />
+              <ClipboardDocumentIcon className="h-5 w-5" />
             )}
           </button>
         </div>
