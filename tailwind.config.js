@@ -178,6 +178,7 @@ export default {
             strong: {
               color: '#E4E5E9',
             },
+            table: { marginTop: '0', marginBottom: '0' },
           },
         },
       },
