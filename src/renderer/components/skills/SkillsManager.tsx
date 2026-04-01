@@ -280,107 +280,8 @@ const SkillsManager: React.FC = () => {
     await handleAddSkillFromSource(skillDownloadSource);
   };
 
-  const getSkillInstallStatus = (marketplaceSkill: MarketplaceSkill): 'not_installed' | 'installed' | 'update_available' => {
-    const installed = skills.find(s => s.id === marketplaceSkill.id);
-    if (!installed) return 'not_installed';
-    if (!marketplaceSkill.version) return 'installed';
-    const localVersion = installed.version || '0.0.0';
-    if (compareVersions(marketplaceSkill.version, localVersion) > 0) return 'update_available';
-    return 'installed';
-  };
-
-  const updatableSkills = useMemo(() => {
-    return marketplaceSkills.filter(ms => {
-      const installed = skills.find(s => s.id === ms.id);
-      if (!installed || !ms.version) return false;
-      const localVersion = installed.version || '0.0.0';
-      return compareVersions(ms.version, localVersion) > 0;
-    });
-  }, [skills, marketplaceSkills]);
-
-  const getInstalledVersion = (skillId: string): string | undefined => {
-    return skills.find(s => s.id === skillId)?.version;
-  };
-
-  const handleUpgradeSkill = async (skill: MarketplaceSkill) => {
-    if (upgradeState?.isActive || !skill.url) return;
-    setSkillActionError('');
-    setUpgradeState({
-      isActive: true,
-      total: 1,
-      current: 1,
-      currentSkillName: skill.name,
-      currentSkillVersion: skill.version,
-    });
-    try {
-      const result = await skillService.upgradeSkill(skill.id, skill.url);
-      if (!result.success) {
-        setSkillActionError(result.error || i18nService.t('skillUpgradeFailed'));
-        setUpgradeState(null);
-        return;
-      }
-      if (result.auditReport && result.pendingInstallId) {
-        setUpgradeState(null);
-        setSecurityReport(result.auditReport);
-        setPendingInstallId(result.pendingInstallId);
-        return;
-      }
-      if (result.skills) {
-        dispatch(setSkills(result.skills));
-      }
-    } catch {
-      setSkillActionError(i18nService.t('skillUpgradeFailed'));
-    } finally {
-      setUpgradeState(null);
-    }
-  };
-
-  const handleUpgradeAll = async () => {
-    if (upgradeState?.isActive || updatableSkills.length === 0) return;
-    setSkillActionError('');
-    upgradeCancelledRef.current = false;
-
-    const toUpdate = [...updatableSkills];
-    setUpgradeState({
-      isActive: true,
-      total: toUpdate.length,
-      current: 0,
-      currentSkillName: '',
-      currentSkillVersion: '',
-    });
-
-    for (let i = 0; i < toUpdate.length; i++) {
-      if (upgradeCancelledRef.current) break;
-      const skill = toUpdate[i];
-      setUpgradeState({
-        isActive: true,
-        total: toUpdate.length,
-        current: i + 1,
-        currentSkillName: skill.name,
-        currentSkillVersion: skill.version,
-      });
-
-      try {
-        const result = await skillService.upgradeSkill(skill.id, skill.url);
-        if (!result.success) {
-          console.warn('[SkillsManager] upgrade failed for', skill.id, result.error);
-          continue;
-        }
-        if (result.auditReport && result.pendingInstallId) {
-          setUpgradeState(null);
-          setSecurityReport(result.auditReport);
-          setPendingInstallId(result.pendingInstallId);
-          return;
-        }
-        if (result.skills) {
-          dispatch(setSkills(result.skills));
-        }
-      } catch (error) {
-        console.warn('[SkillsManager] upgrade threw for', skill.id, error);
-      }
-    }
-
-    setUpgradeState(null);
+  const isSkillInstalled = (skillId: string) => {
+    return skills.some(s => s.id === skillId);
   };
 
   const handleInstallMarketplaceSkill = async (skill: MarketplaceSkill) => {
@@ -615,24 +516,6 @@ const SkillsManager: React.FC = () => {
                   </>
                 )}
                 <span>{formatSkillDate(skill.updatedAt)}</span>
-                </div>
-                {(() => {
-                  const mp = marketplaceSkills.find(m => m.id === skill.id);
-                  if (mp && mp.version && compareVersions(mp.version, skill.version || '0.0.0') > 0) {
-                    return (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleUpgradeSkill(mp); }}
-                        disabled={upgradeState?.isActive === true}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <ArrowPathIcon className="h-3.5 w-3.5" />
-                        {i18nService.t('skillUpgrade')}
-                      </button>
-                    );
-                  }
-                  return null;
-                })()}
               </div>
             </div>
           ))
@@ -698,7 +581,7 @@ const SkillsManager: React.FC = () => {
                     </span>
                   </div>
                   <div className="flex-shrink-0">
-                    {getSkillInstallStatus(skill) !== 'not_installed' ? (
+                    {isSkillInstalled(skill.id) ? (
                       <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg text-green-600 dark:text-green-400 bg-green-500/10">
                         <CheckCircleIcon className="h-3.5 w-3.5" />
                         {i18nService.t('skillAlreadyInstalled')}
@@ -815,7 +698,7 @@ const SkillsManager: React.FC = () => {
               )}
             </div>
 
-            {getSkillInstallStatus(selectedMarketplaceSkill) !== 'not_installed' ? (
+            {isSkillInstalled(selectedMarketplaceSkill.id) ? (
               <div className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-green-500/10 text-green-600 dark:text-green-400 text-sm font-medium">
                 <CheckCircleIcon className="h-4 w-4" />
                 {i18nService.t('skillAlreadyInstalled')}
