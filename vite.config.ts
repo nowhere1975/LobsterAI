@@ -8,6 +8,7 @@ import fs from 'fs';
 // https://vitejs.dev/config/
 const devPort = 5175;
 const katexVersion = process.env.npm_package_dependencies_katex?.replace(/^[~^]/, '') || '0.16.0';
+const isDev = process.env.NODE_ENV !== 'production';
 
 export default defineConfig({
   define: {
@@ -22,9 +23,9 @@ export default defineConfig({
         entry: 'src/main/main.ts',
         vite: {
           build: {
-            sourcemap: true,
+            sourcemap: isDev,
             outDir: 'dist-electron',
-            minify: false,
+            minify: isDev ? false : 'esbuild',
             rollupOptions: {
               external: (id) => {
                 const staticExternals = ['sql.js', 'discord.js', 'zlib-sync', '@discordjs/opus', 'bufferutil', 'utf-8-validate', 'node-nim', 'nim-web-sdk-ng'];
@@ -49,9 +50,9 @@ export default defineConfig({
         entry: 'src/main/preload.ts',
         vite: {
           build: {
-            sourcemap: true,
+            sourcemap: isDev,
             outDir: 'dist-electron',
-            minify: false,
+            minify: isDev ? false : 'esbuild',
           },
         },
         onstart() {},
@@ -68,8 +69,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: true,
-    minify: false,
+    sourcemap: isDev,
+    minify: isDev ? false : 'esbuild',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-syntax': ['react-syntax-highlighter'],
+          'vendor-math': ['katex', 'rehype-katex', 'remark-math'],
+        },
+      },
+    },
   },
   server: {
     port: devPort,

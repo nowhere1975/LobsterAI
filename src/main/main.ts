@@ -2650,63 +2650,67 @@ if (!gotTheLock) {
     const manager = getSkillManager();
     console.log('[Main] initApp: getSkillManager done');
 
-
-    // Non-critical: sync bundled skills to user data.
-    // Wrapped in try-catch so a failure here does not block window creation.
-    try {
-      manager.syncBundledSkillsToUserData();
-      console.log('[Main] initApp: syncBundledSkillsToUserData done');
-    } catch (error) {
-      console.error('[Main] initApp: syncBundledSkillsToUserData failed:', error);
-    }
-
-    // Non-blocking: check Server A for skill updates in the background.
-    manager.checkRemoteSkillUpdates().catch((error) => {
-      console.warn('[Main] initApp: checkRemoteSkillUpdates failed:', error);
-    });
-
-    try {
-      const runtimeResult = await ensurePythonRuntimeReady();
-      if (!runtimeResult.success) {
-        console.error('[Main] initApp: ensurePythonRuntimeReady failed:', runtimeResult.error);
-      } else {
-        console.log('[Main] initApp: ensurePythonRuntimeReady done');
-      }
-    } catch (error) {
-      console.error('[Main] initApp: ensurePythonRuntimeReady threw:', error);
-    }
-
-    try {
-      manager.startWatching();
-      console.log('[Main] initApp: startWatching done');
-    } catch (error) {
-      console.error('[Main] initApp: startWatching failed:', error);
-    }
-
-    // Start skill services (non-critical)
-    try {
-      const skillServices = getSkillServiceManager();
-      console.log('[Main] initApp: getSkillServiceManager done');
-      await skillServices.startAll();
-      console.log('[Main] initApp: skill services started');
-    } catch (error) {
-      console.error('[Main] initApp: skill services failed:', error);
-    }
-
+    // Apply proxy preference before any network calls
     const appConfig = getStore().get<AppConfigSettings>('app_config');
     await applyProxyPreference(getUseSystemProxyFromConfig(appConfig));
-
-    await startCoworkOpenAICompatProxy().catch((error) => {
-      console.error('Failed to start OpenAI compatibility proxy:', error);
-    });
 
     // 设置安全策略
     setContentSecurityPolicy();
 
-    // 创建窗口
+    // 创建窗口（尽早展示，后台任务并行进行）
     console.log('[Main] initApp: creating window');
     createWindow();
     console.log('[Main] initApp: window created');
+
+    // Defer non-critical startup tasks so the window appears immediately
+    setImmediate(() => {
+      void (async () => {
+        // Non-critical: sync bundled skills to user data.
+        try {
+          manager.syncBundledSkillsToUserData();
+          console.log('[Main] initApp: syncBundledSkillsToUserData done');
+        } catch (error) {
+          console.error('[Main] initApp: syncBundledSkillsToUserData failed:', error);
+        }
+
+        // Non-blocking: check Server A for skill updates in the background.
+        manager.checkRemoteSkillUpdates().catch((error) => {
+          console.warn('[Main] initApp: checkRemoteSkillUpdates failed:', error);
+        });
+
+        try {
+          const runtimeResult = await ensurePythonRuntimeReady();
+          if (!runtimeResult.success) {
+            console.error('[Main] initApp: ensurePythonRuntimeReady failed:', runtimeResult.error);
+          } else {
+            console.log('[Main] initApp: ensurePythonRuntimeReady done');
+          }
+        } catch (error) {
+          console.error('[Main] initApp: ensurePythonRuntimeReady threw:', error);
+        }
+
+        try {
+          manager.startWatching();
+          console.log('[Main] initApp: startWatching done');
+        } catch (error) {
+          console.error('[Main] initApp: startWatching failed:', error);
+        }
+
+        // Start skill services (non-critical)
+        try {
+          const skillServices = getSkillServiceManager();
+          console.log('[Main] initApp: getSkillServiceManager done');
+          await skillServices.startAll();
+          console.log('[Main] initApp: skill services started');
+        } catch (error) {
+          console.error('[Main] initApp: skill services failed:', error);
+        }
+
+        await startCoworkOpenAICompatProxy().catch((error) => {
+          console.error('Failed to start OpenAI compatibility proxy:', error);
+        });
+      })();
+    });
 
     // 首次启动时默认开启开机自启动（先写标记再设置，避免崩溃后重复设置）
     if (!getStore().get('auto_launch_initialized')) {

@@ -99,7 +99,9 @@
           "!**/*.spec.*",
           "!**/tests/**",
           "!**/test/**",
-          "!**/__tests__/**"
+          "!**/__tests__/**",
+          "!**/node_modules/typescript/**",
+          "!**/node_modules/@types/**"
         ]
       }
     ]
@@ -173,7 +175,9 @@
           "!**/*.spec.*",
           "!**/tests/**",
           "!**/test/**",
-          "!**/__tests__/**"
+          "!**/__tests__/**",
+          "!**/node_modules/typescript/**",
+          "!**/node_modules/@types/**"
         ]
       }
     ],

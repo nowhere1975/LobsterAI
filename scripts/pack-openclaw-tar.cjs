@@ -63,6 +63,8 @@ const EXCLUDED_DIRS = new Set([
   'coverage',
   '.venv',
   '.bin',  // node_modules/.bin contains symlinks that break tar on cross-platform builds
+  'typescript', // devDependency — compiled dist is already included, no need to ship the compiler
+  '@types',     // TypeScript type definitions — not needed at runtime
 ]);
 
 const EXCLUDED_ENVFILE = /^\.env(\..+)?$/i;
