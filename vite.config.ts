@@ -71,14 +71,7 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: isDev,
     minify: isDev ? false : 'esbuild',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor-syntax': ['react-syntax-highlighter'],
-          'vendor-math': ['katex', 'rehype-katex', 'remark-math'],
-        },
-      },
-    },
+    rollupOptions: {},
   },
   server: {
     port: devPort,

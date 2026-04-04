@@ -2,20 +2,46 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown';
 // @ts-ignore
 import remarkGfm from 'remark-gfm';
-// @ts-ignore
-import remarkMath from 'remark-math';
-// @ts-ignore
-import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import 'katex/contrib/mhchem';
-// @ts-ignore
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-// @ts-ignore
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-// @ts-ignore
-import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ClipboardDocumentIcon, CheckIcon, DocumentIcon, FolderIcon } from '@heroicons/react/24/outline';
 import { i18nService } from '../services/i18n';
+
+// Lazy-loaded modules — dynamic imports so they are excluded from the initial bundle.
+// Both promises are kicked off immediately so the chunks are fetched as early as possible,
+// but they do NOT block the first render (no static import, no synchronous parse cost).
+
+type SyntaxMod = {
+  SyntaxHighlighter: React.ComponentType<any>;
+  oneDark: Record<string, React.CSSProperties>;
+  oneLight: Record<string, React.CSSProperties>;
+};
+type MathMod = { remarkMath: any; rehypeKatex: any };
+
+let syntaxMod: SyntaxMod | null = null;
+let mathMod: MathMod | null = null;
+
+const syntaxModPromise = Promise.all([
+  import('react-syntax-highlighter'),
+  import('react-syntax-highlighter/dist/esm/styles/prism'),
+]).then(([sh, styles]) => {
+  syntaxMod = {
+    SyntaxHighlighter: (sh as any).Prism as React.ComponentType<any>,
+    oneDark: (styles as any).oneDark as Record<string, React.CSSProperties>,
+    oneLight: (styles as any).oneLight as Record<string, React.CSSProperties>,
+  };
+});
+
+const mathModPromise = Promise.all([
+  import('remark-math'),
+  import('rehype-katex'),
+  // @ts-ignore - no type declarations for this contrib module
+  import('katex/contrib/mhchem'),
+]).then(([rm, rk]) => {
+  mathMod = {
+    remarkMath: (rm as any).default ?? rm,
+    rehypeKatex: (rk as any).default ?? rk,
+  };
+});
 
 const CODE_BLOCK_LINE_LIMIT = 200;
 const CODE_BLOCK_CHAR_LIMIT = 20000;
@@ -209,11 +235,24 @@ const CodeBlock: React.FC<any> = ({ node, className, children, ...props }) => {
   const [isCopied, setIsCopied] = useState(false);
   const copyTimeoutRef = useRef<number | null>(null);
   const isDark = useIsDark();
-  const highlighterStyle = isDark ? oneDark : {
-    ...oneLight,
-    'pre[class*="language-"]': { ...(oneLight as Record<string, React.CSSProperties>)['pre[class*="language-"]'], background: '#f0f2f5' },
-    'code[class*="language-"]': { ...(oneLight as Record<string, React.CSSProperties>)['code[class*="language-"]'], background: '#f0f2f5' },
-  };
+  const [syntaxReady, setSyntaxReady] = useState(() => syntaxMod !== null);
+
+  useEffect(() => {
+    if (!syntaxReady) {
+      syntaxModPromise.then(() => setSyntaxReady(true));
+    }
+  }, [syntaxReady]);
+
+  const CurrentSyntaxHighlighter = syntaxMod?.SyntaxHighlighter ?? null;
+  const highlighterStyle = isDark
+    ? syntaxMod?.oneDark
+    : syntaxMod
+      ? {
+          ...syntaxMod.oneLight,
+          'pre[class*="language-"]': { ...(syntaxMod.oneLight as Record<string, React.CSSProperties>)['pre[class*="language-"]'], background: '#f0f2f5' },
+          'code[class*="language-"]': { ...(syntaxMod.oneLight as Record<string, React.CSSProperties>)['code[class*="language-"]'], background: '#f0f2f5' },
+        }
+      : {};
 
   useEffect(() => () => {
     if (copyTimeoutRef.current != null) {
@@ -280,15 +319,15 @@ const CodeBlock: React.FC<any> = ({ node, className, children, ...props }) => {
             )}
           </button>
         </div>
-        {shouldHighlight ? (
-          <SyntaxHighlighter
+        {shouldHighlight && CurrentSyntaxHighlighter ? (
+          <CurrentSyntaxHighlighter
             style={highlighterStyle}
             language={match[1]}
             PreTag="div"
             customStyle={{ ...SYNTAX_HIGHLIGHTER_STYLE, background: isDark ? '#282c34' : '#f0f2f5' }}
           >
             {trimmedCodeText}
-          </SyntaxHighlighter>
+          </CurrentSyntaxHighlighter>
         ) : (
           <div className="m-0 overflow-x-auto dark:bg-[#282c34] bg-[#f0f2f5] text-[13px] leading-6">
             <code className="block px-4 py-3 font-mono dark:text-gray-100 text-gray-800 whitespace-pre">
@@ -626,11 +665,24 @@ const MarkdownContent: React.FC<MarkdownContentProps> = ({
 }) => {
   const components = useMemo(() => createMarkdownComponents(resolveLocalFilePath), [resolveLocalFilePath]);
   const normalizedContent = useMemo(() => normalizeDisplayMath(encodeFileUrlsInMarkdown(content)), [content]);
+  const [mathReady, setMathReady] = useState(() => mathMod !== null);
+
+  useEffect(() => {
+    if (!mathReady) {
+      mathModPromise.then(() => setMathReady(true));
+    }
+  }, [mathReady]);
+
+  const remarkPlugins = mathReady && mathMod
+    ? [remarkGfm, mathMod.remarkMath]
+    : [remarkGfm];
+  const rehypePlugins = mathReady && mathMod ? [mathMod.rehypeKatex] : [];
+
   return (
     <div className={`markdown-content text-[15px] leading-6 ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
         urlTransform={safeUrlTransform}
         components={components}
       >
