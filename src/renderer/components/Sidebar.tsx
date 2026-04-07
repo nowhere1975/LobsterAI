@@ -11,15 +11,16 @@ import SearchIcon from './icons/SearchIcon';
 import PuzzleIcon from './icons/PuzzleIcon';
 import SidebarToggleIcon from './icons/SidebarToggleIcon';
 import TrashIcon from './icons/TrashIcon';
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { ExclamationTriangleIcon, AcademicCapIcon } from '@heroicons/react/24/outline';
 
 interface SidebarProps {
   onShowSettings: () => void;
   onShowLogin?: () => void;
-  activeView: 'cowork' | 'skills' | 'mcp';
+  activeView: 'cowork' | 'skills' | 'mcp' | 'kb';
   onShowSkills: () => void;
   onShowCowork: () => void;
   onShowMcp: () => void;
+  onShowKB: () => void;
   onNewChat: () => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -32,6 +33,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onShowSkills,
   onShowCowork,
   onShowMcp,
+  onShowKB,
   onNewChat,
   isCollapsed,
   onToggleCollapse,
@@ -168,6 +170,21 @@ const Sidebar: React.FC<SidebarProps> = ({
           >
             <SearchIcon className="h-4 w-4" />
             {i18nService.t('search')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsSearchOpen(false);
+              onShowKB();
+            }}
+            className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
+              activeView === 'kb'
+                ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
+                : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+            }`}
+          >
+            <AcademicCapIcon className="h-4 w-4" />
+            {i18nService.t('knowledgeBase')}
           </button>
           <button
             type="button"

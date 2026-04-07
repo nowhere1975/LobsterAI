@@ -8,6 +8,7 @@ import WindowTitleBar from './components/window/WindowTitleBar';
 import { CoworkView } from './components/cowork';
 import { SkillsView } from './components/skills';
 import { McpView } from './components/mcp';
+import KBManagePage from './components/kb/KBManagePage';
 import CoworkPermissionModal from './components/cowork/CoworkPermissionModal';
 import CoworkQuestionWizard from './components/cowork/CoworkQuestionWizard';
 import { configService } from './services/config';
@@ -27,7 +28,7 @@ import { matchesShortcut } from './services/shortcuts';
 const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsOptions, setSettingsOptions] = useState<SettingsOpenOptions>({});
-  const [mainView, setMainView] = useState<'cowork' | 'skills' | 'mcp'>('cowork');
+  const [mainView, setMainView] = useState<'cowork' | 'skills' | 'mcp' | 'kb'>('cowork');
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -460,6 +461,7 @@ const App: React.FC = () => {
           onShowSkills={handleShowSkills}
           onShowCowork={handleShowCowork}
           onShowMcp={handleShowMcp}
+          onShowKB={() => setMainView('kb')}
           onNewChat={handleNewChat}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={handleToggleSidebar}
@@ -478,6 +480,8 @@ const App: React.FC = () => {
                 onToggleSidebar={handleToggleSidebar}
                 onNewChat={handleNewChat}
               />
+            ) : mainView === 'kb' ? (
+              <KBManagePage />
             ) : (
               <CoworkView
                 onRequestAppSettings={handleShowSettings}

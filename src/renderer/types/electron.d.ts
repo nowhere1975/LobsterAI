@@ -215,6 +215,22 @@ interface IElectronAPI {
     ) => Promise<{ success: boolean; result?: EmailConnectivityTestResult; error?: string }>;
     onChanged: (callback: () => void) => () => void;
   };
+  kb: {
+    addFolder: (folderPath: string) => Promise<{ id: number; path: string; created_at: number }>;
+    removeFolder: (folderId: number) => Promise<void>;
+    clearFolderIndex: (folderId: number) => Promise<void>;
+    listFolders: () => Promise<Array<{ id: number; path: string; created_at: number; doc_count?: number; status?: 'idle' | 'indexing' }>>;
+    rebuild: () => Promise<void>;
+    getStats: () => Promise<{ total_docs: number; done_docs: number; error_docs: number; total_chunks: number; error_files: Array<{ file_path: string; error_msg: string | null }> }>;
+    selectFolder: () => Promise<string | null>;
+    getConfig: () => Promise<{ trigger_words: string; top_k: string }>;
+    setConfig: (config: Record<string, string>) => Promise<void>;
+    listDocs: (folderId: number) => Promise<Array<{ id: number; file_path: string; file_hash: string | null; status: string; error_msg: string | null; chunk_count: number | null }>>;
+    getScope: () => Promise<string>;
+    generateScope: () => Promise<string>;
+    onIndexProgress: (callback: (progress: { total: number; done: number; current_file: string; errors: string[] }) => void) => () => void;
+    onKBRetrieval: (callback: (data: { sessionId: string; chunksCount: number; sources: string[] }) => void) => () => void;
+  };
   mcp: {
     list: () => Promise<{ success: boolean; servers?: McpServerConfigIPC[]; error?: string }>;
     create: (data: any) => Promise<{ success: boolean; servers?: McpServerConfigIPC[]; error?: string }>;

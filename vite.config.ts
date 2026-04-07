@@ -31,6 +31,7 @@ export default defineConfig({
                 const staticExternals = ['sql.js', 'discord.js', 'zlib-sync', '@discordjs/opus', 'bufferutil', 'utf-8-validate', 'node-nim', 'nim-web-sdk-ng'];
                 if (staticExternals.includes(id)) return true;
                 if (id.startsWith('@larksuite/openclaw-lark-tools') || id.startsWith('@larksuite/openclaw-lark')) return true;
+                if (id.startsWith('@lancedb/') || id === 'chokidar') return true;
                 return false;
               },
               output: {
@@ -85,7 +86,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['electron', '@larksuite/openclaw-lark-tools', '@larksuite/openclaw-lark'],
+    exclude: ['electron', '@larksuite/openclaw-lark-tools', '@larksuite/openclaw-lark', '@lancedb/lancedb', 'chokidar'],
     esbuildOptions: {
       define: {
         __VERSION__: JSON.stringify(katexVersion),

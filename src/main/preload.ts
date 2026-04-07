@@ -331,4 +331,36 @@ contextBridge.exposeInMainWorld('electron', {
         }>,
     },
   },
+  kb: {
+    addFolder: (folderPath: string) => ipcRenderer.invoke('kb:addFolder', folderPath),
+    removeFolder: (folderId: number) => ipcRenderer.invoke('kb:removeFolder', folderId),
+    clearFolderIndex: (folderId: number) => ipcRenderer.invoke('kb:clearFolderIndex', folderId),
+    listFolders: () => ipcRenderer.invoke('kb:listFolders'),
+    rebuild: () => ipcRenderer.invoke('kb:rebuild'),
+    getStats: () => ipcRenderer.invoke('kb:getStats'),
+    selectFolder: () => ipcRenderer.invoke('kb:selectFolder'),
+    getConfig: () => ipcRenderer.invoke('kb:getConfig'),
+    setConfig: (config: Record<string, string>) => ipcRenderer.invoke('kb:setConfig', config),
+    listDocs: (folderId: number) => ipcRenderer.invoke('kb:listDocs', folderId),
+    getScope: () => ipcRenderer.invoke('kb:getScope'),
+    generateScope: () => ipcRenderer.invoke('kb:generateScope'),
+    onIndexProgress: (callback: (progress: {
+      total: number;
+      done: number;
+      current_file: string;
+      errors: string[];
+    }) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, progress: unknown) => callback(progress as {
+        total: number; done: number; current_file: string; errors: string[];
+      });
+      ipcRenderer.on('kb:onIndexProgress', handler);
+      return () => ipcRenderer.removeListener('kb:onIndexProgress', handler);
+    },
+    onKBRetrieval: (callback: (data: { sessionId: string; chunksCount: number; sources: string[] }) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, data: unknown) =>
+        callback(data as { sessionId: string; chunksCount: number; sources: string[] });
+      ipcRenderer.on('kb:retrieval', handler);
+      return () => ipcRenderer.removeListener('kb:retrieval', handler);
+    },
+  },
 });

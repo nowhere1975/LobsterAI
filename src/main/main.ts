@@ -5,6 +5,7 @@ import fs from 'fs';
 import { spawn } from 'child_process';
 import { SqliteStore } from './sqliteStore';
 import { CoworkStore } from './coworkStore';
+import { KBManager } from './kb';
 import { CoworkRunner } from './libs/coworkRunner';
 import {
   ClaudeRuntimeAdapter,
@@ -546,6 +547,7 @@ process.on('exit', (code) => {
 });
 
 let store: SqliteStore | null = null;
+let kbManager: KBManager | null = null;
 let coworkStore: CoworkStore | null = null;
 let coworkRunner: CoworkRunner | null = null;
 let claudeRuntimeAdapter: ClaudeRuntimeAdapter | null = null;
@@ -599,7 +601,13 @@ const getCoworkStore = () => {
 
 const getCoworkRunner = () => {
   if (!coworkRunner) {
-    coworkRunner = new CoworkRunner(getCoworkStore());
+    coworkRunner = new CoworkRunner(getCoworkStore(), kbManager ?? undefined);
+
+    coworkRunner.setSendToWindows((channel, ...args) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(channel, ...args);
+      }
+    });
 
     // Provide MCP server configuration to the runner
     coworkRunner.setMcpServerProvider(() => {
@@ -2328,6 +2336,61 @@ if (!gotTheLock) {
     return false;
   });
 
+  // ── KB IPC handlers ──────────────────────────────────────────────────────
+
+  ipcMain.handle('kb:addFolder', async (_event, folderPath: string) => {
+    return kbManager!.addFolder(folderPath);
+  });
+
+  ipcMain.handle('kb:removeFolder', (_event, folderId: number) => {
+    kbManager!.removeFolder(folderId);
+  });
+
+  ipcMain.handle('kb:clearFolderIndex', (_event, folderId: number) => {
+    kbManager!.clearFolderIndex(folderId);
+  });
+
+  ipcMain.handle('kb:listFolders', () => {
+    return kbManager!.listFolders();
+  });
+
+  ipcMain.handle('kb:rebuild', async () => {
+    await kbManager!.rebuild();
+  });
+
+  ipcMain.handle('kb:getStats', () => {
+    return kbManager!.getStats();
+  });
+
+  ipcMain.handle('kb:selectFolder', async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle('kb:getConfig', () => {
+    return {
+      trigger_words: store!.get<string>('kb:trigger_words') ?? '知识库',
+      top_k: store!.get<string>('kb:top_k') ?? '5',
+    };
+  });
+
+  ipcMain.handle('kb:setConfig', (_event, config: { trigger_words?: string; top_k?: string }) => {
+    if (config.trigger_words !== undefined) store!.set('kb:trigger_words', config.trigger_words);
+    if (config.top_k !== undefined) store!.set('kb:top_k', config.top_k);
+  });
+
+  ipcMain.handle('kb:listDocs', (_event, folderId: number) => {
+    return store!.listKBDocsByFolder(folderId);
+  });
+
+  ipcMain.handle('kb:getScope', () => {
+    return kbManager!.getScope();
+  });
+
+  ipcMain.handle('kb:generateScope', async () => {
+    return kbManager!.generateScope();
+  });
+
   // 设置 Content Security Policy
   const setContentSecurityPolicy = () => {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -2502,6 +2565,8 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
+    if (kbManager) kbManager.registerWindow(mainWindow);
+
     const forwardWindowState = () => emitWindowState();
     mainWindow.on('maximize', forwardWindowState);
     mainWindow.on('unmaximize', forwardWindowState);
@@ -2620,6 +2685,9 @@ if (!gotTheLock) {
     console.log('[Main] initApp: starting initStore()');
     store = await initStore();
     console.log('[Main] initApp: store initialized');
+    kbManager = new KBManager(store, app.getPath('userData'));
+    await kbManager.init();
+    console.log('[Main] initApp: KBManager initialized');
 
     // Defensive recovery: app may be force-closed during execution and leave
     // stale running flags in DB. Normalize them on startup.

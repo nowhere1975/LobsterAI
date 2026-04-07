@@ -175,6 +175,35 @@ export class SqliteStore {
       );
     `);
 
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS kb_folders (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        path       TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+      );
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS kb_docs (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        folder_id   INTEGER NOT NULL REFERENCES kb_folders(id),
+        file_path   TEXT NOT NULL UNIQUE,
+        file_hash   TEXT,
+        status      TEXT NOT NULL DEFAULT 'pending',
+        error_msg   TEXT,
+        chunk_count INTEGER,
+        updated_at  INTEGER
+      );
+    `);
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_kb_docs_folder_id ON kb_docs(folder_id);
+    `);
+
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_kb_docs_file_path ON kb_docs(file_path);
+    `);
+
     // Migrations - safely add columns if they don't exist
     try {
       // Check if execution_mode column exists
@@ -402,6 +431,136 @@ export class SqliteStore {
     }
 
     this.set(USER_MEMORIES_MIGRATION_KEY, '1');
+  }
+
+  // ── KB Folders ──────────────────────────────────────────────────────────
+
+  addKBFolder(folderPath: string): number {
+    this.db.run(
+      `INSERT OR IGNORE INTO kb_folders (path, created_at) VALUES (?, ?)`,
+      [folderPath, Date.now()]
+    );
+    const rows = this.db.exec(
+      `SELECT id FROM kb_folders WHERE path = ?`,
+      [folderPath]
+    );
+    const id = rows[0]?.values[0]?.[0] as number;
+    this.save();
+    return id;
+  }
+
+  removeKBFolder(folderId: number): void {
+    this.db.run(`DELETE FROM kb_docs WHERE folder_id = ?`, [folderId]);
+    this.db.run(`DELETE FROM kb_folders WHERE id = ?`, [folderId]);
+    this.save();
+  }
+
+  listKBFolders(): Array<{ id: number; path: string; created_at: number }> {
+    const rows = this.db.exec(`SELECT id, path, created_at FROM kb_folders ORDER BY created_at ASC`);
+    if (!rows.length) return [];
+    return rows[0].values.map(([id, path, created_at]) => ({
+      id: id as number,
+      path: path as string,
+      created_at: created_at as number,
+    }));
+  }
+
+  // ── KB Docs ──────────────────────────────────────────────────────────────
+
+  upsertKBDoc(doc: {
+    folder_id: number;
+    file_path: string;
+    file_hash?: string;
+    status: string;
+    error_msg?: string;
+    chunk_count?: number;
+  }): void {
+    this.db.run(
+      `INSERT INTO kb_docs (folder_id, file_path, file_hash, status, error_msg, chunk_count, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(file_path) DO UPDATE SET
+         file_hash = excluded.file_hash,
+         status = excluded.status,
+         error_msg = excluded.error_msg,
+         chunk_count = excluded.chunk_count,
+         updated_at = excluded.updated_at`,
+      [
+        doc.folder_id,
+        doc.file_path,
+        doc.file_hash ?? null,
+        doc.status,
+        doc.error_msg ?? null,
+        doc.chunk_count ?? null,
+        Date.now(),
+      ]
+    );
+    this.save();
+  }
+
+  getKBDoc(filePath: string): { id: number; folder_id: number; file_path: string; file_hash: string | null; status: string; error_msg: string | null; chunk_count: number | null } | null {
+    const rows = this.db.exec(
+      `SELECT id, folder_id, file_path, file_hash, status, error_msg, chunk_count FROM kb_docs WHERE file_path = ?`,
+      [filePath]
+    );
+    if (!rows.length || !rows[0].values.length) return null;
+    const [id, folder_id, file_path, file_hash, status, error_msg, chunk_count] = rows[0].values[0];
+    return { id: id as number, folder_id: folder_id as number, file_path: file_path as string, file_hash: file_hash as string | null, status: status as string, error_msg: error_msg as string | null, chunk_count: chunk_count as number | null };
+  }
+
+  deleteKBDoc(filePath: string): void {
+    this.db.run(`DELETE FROM kb_docs WHERE file_path = ?`, [filePath]);
+    this.save();
+  }
+
+  listKBDocsByFolder(folderId: number): Array<{ id: number; file_path: string; file_hash: string | null; status: string; error_msg: string | null; chunk_count: number | null }> {
+    const rows = this.db.exec(
+      `SELECT id, file_path, file_hash, status, error_msg, chunk_count FROM kb_docs WHERE folder_id = ? ORDER BY file_path ASC`,
+      [folderId]
+    );
+    if (!rows.length) return [];
+    return rows[0].values.map(([id, file_path, file_hash, status, error_msg, chunk_count]) => ({
+      id: id as number,
+      file_path: file_path as string,
+      file_hash: file_hash as string | null,
+      status: status as string,
+      error_msg: error_msg as string | null,
+      chunk_count: chunk_count as number | null,
+    }));
+  }
+
+  getKBStats(): { total_docs: number; done_docs: number; error_docs: number; total_chunks: number } {
+    const rows = this.db.exec(`
+      SELECT
+        COUNT(*) as total_docs,
+        SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done_docs,
+        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_docs,
+        COALESCE(SUM(chunk_count), 0) as total_chunks
+      FROM kb_docs
+    `);
+    if (!rows.length || !rows[0].values.length) return { total_docs: 0, done_docs: 0, error_docs: 0, total_chunks: 0 };
+    const [total_docs, done_docs, error_docs, total_chunks] = rows[0].values[0];
+    return {
+      total_docs: total_docs as number,
+      done_docs: done_docs as number,
+      error_docs: error_docs as number,
+      total_chunks: total_chunks as number,
+    };
+  }
+
+  listKBErrorDocs(): Array<{ file_path: string; error_msg: string | null }> {
+    const rows = this.db.exec(
+      `SELECT file_path, error_msg FROM kb_docs WHERE status = 'error' ORDER BY file_path ASC`
+    );
+    if (!rows.length) return [];
+    return rows[0].values.map(([file_path, error_msg]) => ({
+      file_path: file_path as string,
+      error_msg: error_msg as string | null,
+    }));
+  }
+
+  clearKBDocsByFolder(folderId: number): void {
+    this.db.run(`DELETE FROM kb_docs WHERE folder_id = ?`, [folderId]);
+    this.save();
   }
 
   private migrateFromElectronStore(userDataPath: string) {

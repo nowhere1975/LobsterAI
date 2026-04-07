@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { FolderIcon } from '@heroicons/react/24/solid';
 import { coworkService } from '../../services/cowork';
+import { kbService } from '../../services/kb';
 import SidebarToggleIcon from '../icons/SidebarToggleIcon';
 import ComposeIcon from '../icons/ComposeIcon';
 import LazyRenderTurn, { clearHeightCache } from './LazyRenderTurn';
@@ -1339,6 +1340,23 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     }
   }, [isRenaming, currentSession?.title]);
 
+  // KB retrieval badge: track per-session retrieval events
+  const [kbRetrievals, setKBRetrievals] = useState<Map<string, { chunksCount: number; sources: string[] }>>(new Map());
+  useEffect(() => {
+    setKBRetrievals(new Map()); // reset on session change
+  }, [sessionId]);
+  useEffect(() => {
+    const unsub = kbService.onKBRetrieval(({ sessionId: sid, chunksCount, sources }) => {
+      if (sid !== sessionId) return;
+      setKBRetrievals((prev) => {
+        const next = new Map(prev);
+        next.set('latest', { chunksCount, sources });
+        return next;
+      });
+    });
+    return unsub;
+  }, [sessionId]);
+
   useEffect(() => {
     setShouldAutoScroll(true);
   }, [currentSession?.id]);
@@ -1915,6 +1933,11 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
           {turn.userMessage && (
             <div data-export-role="user-message">
               <UserMessageItem message={turn.userMessage} skills={skills} />
+              {isLastTurn && kbRetrievals.has('latest') && (
+                <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary flex items-center gap-1 mt-1 ml-2 pb-1">
+                  🔍 {i18nService.t('kbRetrievedChunks').replace('{count}', String(kbRetrievals.get('latest')!.chunksCount))}
+                </div>
+              )}
             </div>
           )}
           {showAssistantBlock && (
