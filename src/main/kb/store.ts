@@ -64,6 +64,7 @@ export class KBStore {
     try {
       const results = await this.table
         .vectorSearch(queryVector)
+        .distanceType('cosine')
         .limit(topK)
         .toArray();
 
@@ -75,6 +76,41 @@ export class KBStore {
           score: 1 - (row['_distance'] as number), // cosine distance → similarity
         }))
         .filter((r) => r.score >= SIMILARITY_THRESHOLD);
+    } catch {
+      return [];
+    }
+  }
+
+  async sampleChunks(n: number): Promise<string[]> {
+    if (!this.table) return [];
+    try {
+      // Load all text chunks (skip vector column to keep memory low)
+      const rows = await this.table.query().select(['file_path', 'text']).toArray();
+      // Fisher-Yates shuffle for true random sampling across all files
+      for (let i = rows.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [rows[i], rows[j]] = [rows[j], rows[i]];
+      }
+      // Deduplicate by file to ensure diversity across documents
+      const seen = new Set<string>();
+      const diverse: string[] = [];
+      for (const r of rows) {
+        const fp = r['file_path'] as string;
+        if (!seen.has(fp)) {
+          seen.add(fp);
+          diverse.push(r['text'] as string);
+          if (diverse.length >= n) break;
+        }
+      }
+      // If not enough unique files, fill up with remaining shuffled chunks
+      if (diverse.length < n) {
+        for (const r of rows) {
+          if (diverse.length >= n) break;
+          const text = r['text'] as string;
+          if (!diverse.includes(text)) diverse.push(text);
+        }
+      }
+      return diverse;
     } catch {
       return [];
     }

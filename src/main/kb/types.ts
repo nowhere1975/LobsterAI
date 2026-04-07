@@ -43,6 +43,6 @@ export interface KBIndexProgress {
 export const KB_SUPPORTED_EXTENSIONS = new Set([
   '.pdf', '.docx', '.pptx',
   '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff',
-  '.xlsx',
+  '.xlsx', '.xls',
   '.md',
 ]);

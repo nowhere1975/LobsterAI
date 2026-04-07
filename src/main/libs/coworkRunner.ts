@@ -268,8 +268,17 @@ export class CoworkRunner extends EventEmitter {
     if (!this.kbManager) return null;
     if (!this.kbManager.hasTriggerWord(userMessage)) return null;
 
-    const results = await this.kbManager.search(userMessage);
-    if (!results.length) return null;
+    let results;
+    try {
+      results = await this.kbManager.search(userMessage);
+    } catch (err) {
+      console.warn('[CoworkRunner] KB search failed, skipping context injection:', err);
+      return null;
+    }
+    if (!results.length) {
+      console.debug('[CoworkRunner] KB trigger matched but search returned no results');
+      return null;
+    }
 
     const sections = results.map((r) => {
       const fileName = r.file_path.split(/[/\\]/).pop() ?? r.file_path;
@@ -1240,8 +1249,11 @@ export class CoworkRunner extends EventEmitter {
         '- Never write transient conversation facts, news content, or source citations into user memory unless the user explicitly asks.'
       );
     }
+    const kbPrompt = this.kbManager
+      ? '## Knowledge Base\n- A local knowledge base is available via the `search_knowledge_base` tool.\n- Use it whenever the user asks about topics that may be covered in their uploaded documents (aviation, regulations, manuals, course materials, etc.).\n- Do NOT use Bash/Grep/Glob to search for document content — always use `search_knowledge_base` instead.\n- If the tool returns no results, say so clearly rather than guessing.'
+      : '';
     const trimmedBasePrompt = baseSystemPrompt?.trim();
-    return [safetyPrompt, windowsEncodingPrompt, windowsBundledRuntimePrompt, memoryRecallPrompt.join('\n'), trimmedBasePrompt]
+    return [safetyPrompt, windowsEncodingPrompt, windowsBundledRuntimePrompt, memoryRecallPrompt.join('\n'), kbPrompt, trimmedBasePrompt]
       .filter((section): section is string => Boolean(section?.trim()))
       .join('\n\n');
   }
@@ -2128,12 +2140,59 @@ export class CoworkRunner extends EventEmitter {
           )
         );
       }
+      // ── Knowledge base search tool ────────────────────────────────────────────
+      const kbTools: any[] = [];
+      if (this.kbManager) {
+        const kbMgr = this.kbManager;
+        kbTools.push(
+          tool(
+            'search_knowledge_base',
+            'Search the local knowledge base for documents relevant to the query. ' +
+            'Use this tool whenever the user asks about topics that may be covered in uploaded files ' +
+            '(PDFs, Word documents, PPTs, spreadsheets). ' +
+            'Returns ranked text chunks with source file names.',
+            {
+              query: z.string().min(1).describe('The search query in natural language'),
+            },
+            async (args: { query: string }) => {
+              try {
+                const results = await kbMgr.search(args.query, 8);
+                if (!results.length) {
+                  return {
+                    content: [{ type: 'text', text: '知识库中未找到相关内容。知识库可能为空，或 Zhipu API Key 未配置。' }],
+                  } as any;
+                }
+                const sections = results.map((r, i) => {
+                  const fileName = r.file_path.split(/[/\\]/).pop() ?? r.file_path;
+                  return `[${i + 1}] 来源：${fileName}\n${r.text}`;
+                });
+                return {
+                  content: [{ type: 'text', text: sections.join('\n\n---\n\n') }],
+                } as any;
+              } catch (err) {
+                return {
+                  content: [{ type: 'text', text: `知识库搜索失败：${err instanceof Error ? err.message : String(err)}` }],
+                  isError: true,
+                } as any;
+              }
+            }
+          )
+        );
+      }
+
+      const kbServerName = `kb-${sessionId.slice(0, 8)}`;
       options.mcpServers = {
         ...(options.mcpServers as Record<string, unknown> | undefined),
         [memoryServerName]: createSdkMcpServer({
           name: memoryServerName,
           tools: memoryTools,
         }),
+        ...(kbTools.length > 0 ? {
+          [kbServerName]: createSdkMcpServer({
+            name: kbServerName,
+            tools: kbTools,
+          }),
+        } : {}),
       };
       let userMcpServerCount = 0;
 

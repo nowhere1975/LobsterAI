@@ -2371,16 +2371,24 @@ if (!gotTheLock) {
     return {
       trigger_words: store!.get<string>('kb:trigger_words') ?? '知识库',
       top_k: store!.get<string>('kb:top_k') ?? '5',
-      mineru_key: store!.get<string>('kb:mineru_key') ?? '',
-      zhipu_key: store!.get<string>('kb:zhipu_key') ?? '',
     };
   });
 
-  ipcMain.handle('kb:setConfig', (_event, config: { trigger_words?: string; top_k?: string; mineru_key?: string; zhipu_key?: string }) => {
+  ipcMain.handle('kb:setConfig', (_event, config: { trigger_words?: string; top_k?: string }) => {
     if (config.trigger_words !== undefined) store!.set('kb:trigger_words', config.trigger_words);
     if (config.top_k !== undefined) store!.set('kb:top_k', config.top_k);
-    if (config.mineru_key !== undefined) store!.set('kb:mineru_key', config.mineru_key);
-    if (config.zhipu_key !== undefined) store!.set('kb:zhipu_key', config.zhipu_key);
+  });
+
+  ipcMain.handle('kb:listDocs', (_event, folderId: number) => {
+    return store!.listKBDocsByFolder(folderId);
+  });
+
+  ipcMain.handle('kb:getScope', () => {
+    return kbManager!.getScope();
+  });
+
+  ipcMain.handle('kb:generateScope', async () => {
+    return kbManager!.generateScope();
   });
 
   // 设置 Content Security Policy

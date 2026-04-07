@@ -12,8 +12,10 @@ import { KB_SUPPORTED_EXTENSIONS } from './types';
 
 const CHUNK_SIZE = 500;           // tokens ≈ chars for CJK
 const CHUNK_OVERLAP = 100;
-const ROWS_PER_CHUNK = 20;        // Excel rows per chunk
-const EMBED_BATCH_SIZE = 16;      // Zhipu embedding batch size
+const ROWS_PER_CHUNK = 5;         // Excel rows per chunk (keep chunks within embedding token limits)
+const EMBED_BATCH_SIZE = 16;      // embedding batch size
+const MAX_CHUNK_CHARS = 2000;     // Hard cap per chunk before sending to embedding API
+const KB_SERVER_URL = 'http://1.14.96.63:3000'; // LLM relay server
 
 // ── Pure helpers (exported for testing) ─────────────────────────────────────
 
@@ -38,10 +40,12 @@ export function chunkExcel(
 
   for (let i = 0; i < dataRows.length; i += rowsPerChunk) {
     const batch = dataRows.slice(i, i + rowsPerChunk);
-    const lines = batch.map((row) =>
-      header.map((h, idx) => `${h}: ${row[idx] ?? ''}`).join(', ')
-    );
-    chunks.push(`[Sheet: ${sheetName}]\n` + lines.join('\n'));
+    const lines = batch
+      .map((row) => header.map((h, idx) => `${h}: ${row[idx] ?? ''}`).join(', '))
+      .filter((line) => line.replace(/[:,\s]/g, '').length > 0); // skip all-empty rows
+    if (lines.length > 0) {
+      chunks.push(`[Sheet: ${sheetName}]\n` + lines.join('\n'));
+    }
   }
   return chunks;
 }
@@ -56,136 +60,146 @@ function fileHash(filePath: string): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
-// ── API clients ──────────────────────────────────────────────────────────────
+// ── Local document parsers ───────────────────────────────────────────────────
 
-const MINERU_BASE = 'https://mineru.net';
-const MINERU_POLL_INTERVAL = 4000;   // 4s between polls
-const MINERU_POLL_TIMEOUT = 300000;  // 5 min max
+/** Extract plain text from a PPTX file by reading slide XMLs from the ZIP. */
+async function parsePptx(filePath: string): Promise<string> {
+  // Use node-stream-zip for random-access reads — handles large PPTX files
+  // with embedded videos without loading the entire archive into memory.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const StreamZip = require('node-stream-zip') as { async: new (opts: { file: string }) => NodeStreamZipAsync };
 
-async function callMinerUAPI(filePath: string, mineruApiKey: string): Promise<string> {
-  const FormData = (await import('form-data')).default;
-  const fetch = (await import('electron')).net.fetch;
-  const extractZip = (await import('extract-zip')).default;
-  const os = await import('os');
-
-  // Step 1: Submit task
-  const form = new FormData();
-  form.append('file', fs.readFileSync(filePath), { filename: path.basename(filePath) });
-
-  const submitResp = await fetch(`${MINERU_BASE}/api/v4/extract/task`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${mineruApiKey}`,
-      ...form.getHeaders(),
-    },
-    body: form.getBuffer() as unknown as BodyInit,
-  });
-
-  if (!submitResp.ok) {
-    throw new Error(`MinerU submit error ${submitResp.status}: ${await submitResp.text()}`);
+  interface NodeStreamZipAsync {
+    entries(): Promise<Record<string, unknown>>;
+    entryData(name: string): Promise<Buffer>;
+    close(): Promise<void>;
   }
 
-  const submitJson = await submitResp.json() as { code: number; data?: { task_id?: string } };
-  const taskId = submitJson.data?.task_id;
-  if (!taskId) throw new Error(`MinerU: no task_id in response: ${JSON.stringify(submitJson)}`);
-
-  console.log(`[KBIndexer] MinerU task submitted: ${taskId} for ${path.basename(filePath)}`);
-
-  // Step 2: Poll for completion
-  const deadline = Date.now() + MINERU_POLL_TIMEOUT;
-  while (Date.now() < deadline) {
-    await new Promise<void>((r) => setTimeout(r, MINERU_POLL_INTERVAL));
-
-    const pollResp = await fetch(`${MINERU_BASE}/api/v4/extract/task/${taskId}`, {
-      headers: { Authorization: `Bearer ${mineruApiKey}` },
-    });
-
-    if (!pollResp.ok) {
-      console.warn(`[KBIndexer] MinerU poll error ${pollResp.status}, retrying…`);
-      continue;
-    }
-
-    const pollJson = await pollResp.json() as {
-      code: number;
-      data?: { state?: string; result?: { download_url?: string } };
-    };
-
-    const state = pollJson.data?.state;
-    console.debug(`[KBIndexer] MinerU task ${taskId} state: ${state}`);
-
-    if (state === 'failed') throw new Error('MinerU: task processing failed');
-    if (state === 'done') {
-      const downloadUrl = pollJson.data?.result?.download_url;
-      if (!downloadUrl) throw new Error(`MinerU: done but no download_url: ${JSON.stringify(pollJson)}`);
-      return await mineruDownloadMarkdown(downloadUrl, taskId, fetch, extractZip, os);
-    }
-    // states: pending / processing / done / failed — keep polling
-  }
-
-  throw new Error('MinerU: task timed out after 5 minutes');
-}
-
-async function mineruDownloadMarkdown(
-  downloadUrl: string,
-  taskId: string,
-  fetch: typeof globalThis.fetch,
-  extractZip: (zipPath: string, opts: { dir: string }) => Promise<void>,
-  os: typeof import('os'),
-): Promise<string> {
-  const zipResp = await (fetch as (url: string) => Promise<Response>)(downloadUrl);
-  if (!zipResp.ok) throw new Error(`MinerU: download failed ${zipResp.status}`);
-
-  const zipBuffer = Buffer.from(await zipResp.arrayBuffer());
-  const tmpDir = path.join(os.tmpdir(), `mineru-${taskId}`);
-  const tmpZip = `${tmpDir}.zip`;
-
-  fs.writeFileSync(tmpZip, zipBuffer);
-  fs.mkdirSync(tmpDir, { recursive: true });
-
+  const zip = new StreamZip.async({ file: filePath });
   try {
-    await extractZip(tmpZip, { dir: tmpDir });
-
-    // Find the first .md file in the extracted content
-    const walk = (dir: string): string[] =>
-      fs.readdirSync(dir).flatMap((f) => {
-        const full = path.join(dir, f);
-        return fs.statSync(full).isDirectory() ? walk(full) : [full];
+    const entries = await zip.entries();
+    const slideNames = Object.keys(entries)
+      .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+      .sort((a, b) => {
+        const n = (s: string) => parseInt(s.match(/(\d+)\.xml$/)?.[1] ?? '0', 10);
+        return n(a) - n(b);
       });
 
-    const mdFile = walk(tmpDir).find((f) => f.endsWith('.md'));
-    if (!mdFile) throw new Error('MinerU: no .md file found in result zip');
+    const slideTexts: string[] = [];
+    for (const name of slideNames) {
+      const xml = (await zip.entryData(name)).toString('utf-8');
+      const parts = [...xml.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)].map((m) => m[1]);
+      const text = parts.join(' ').replace(/\s+/g, ' ').trim();
+      if (text) slideTexts.push(text);
+    }
 
-    return fs.readFileSync(mdFile, 'utf-8');
+    return slideTexts.join('\n\n');
   } finally {
-    try { fs.rmSync(tmpZip); } catch { /* ignore */ }
-    try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+    await zip.close();
   }
 }
 
-async function callZhipuEmbedding(texts: string[], zhipuApiKey: string): Promise<number[][]> {
+/** Extract plain text from a DOCX file by reading word/document.xml from the ZIP. */
+async function parseDocx(filePath: string): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const StreamZip = require('node-stream-zip') as { async: new (opts: { file: string }) => { entryData(name: string): Promise<Buffer>; close(): Promise<void> } };
+  const zip = new StreamZip.async({ file: filePath });
+  try {
+    const xml = (await zip.entryData('word/document.xml')).toString('utf-8');
+    const withBreaks = xml.replace(/<w:p[ >]/g, '\n<w:p>');
+    const parts = [...withBreaks.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]);
+    return parts.join('').replace(/\n{3,}/g, '\n\n').trim();
+  } finally {
+    await zip.close();
+  }
+}
+
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff']);
+const IMAGE_MIME: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  gif: 'image/gif', webp: 'image/webp', bmp: 'image/png', tiff: 'image/png',
+};
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/** Describe an image via Server A → Zhipu GLM-4V. */
+async function describeImageWithZhipu(filePath: string, deviceId: string): Promise<string> {
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_IMAGE_BYTES) {
+    throw new Error(`image too large (${Math.round(stat.size / 1024)}KB > 4096KB limit)`);
+  }
+
+  const fetch = (await import('electron')).net.fetch;
+  const ext = path.extname(filePath).toLowerCase().slice(1);
+  const mimeType = IMAGE_MIME[ext] ?? 'image/jpeg';
+  const imageBase64 = fs.readFileSync(filePath).toString('base64');
+
+  const resp = await fetch(`${KB_SERVER_URL}/api/kb/describe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId, imageBase64, mimeType }),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`KB describe error ${resp.status}: ${await resp.text()}`);
+  }
+
+  const json = await resp.json() as { description?: string };
+  return json.description ?? '';
+}
+
+/** Extract plain text from a PDF file. */
+async function parsePdf(filePath: string): Promise<string> {
+  // pdf-parse v2: class-based API, accepts a local file path via `url`
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { PDFParse } = require('pdf-parse') as { PDFParse: new (opts: { url: string }) => { getText(): Promise<{ text: string }> } };
+  const parser = new PDFParse({ url: filePath });
+  const result = await parser.getText();
+  return result.text;
+}
+
+async function callEmbeddingBatch(texts: string[], deviceId: string): Promise<number[][]> {
   const fetch = (await import('electron')).net.fetch;
 
-  const response = await fetch('https://open.bigmodel.cn/api/paas/v4/embeddings', {
+  const response = await fetch(`${KB_SERVER_URL}/api/kb/embed`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${zhipuApiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ model: 'embedding-3', input: texts }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceId, texts }),
   });
 
   if (!response.ok) {
-    throw new Error(`Zhipu embedding error ${response.status}: ${await response.text()}`);
+    throw new Error(`KB embed error ${response.status}: ${await response.text()}`);
   }
 
   const json = await response.json() as { data: Array<{ embedding: number[] }> };
   return json.data.map((item) => item.embedding);
 }
 
+/** Call embedding API for a batch; on failure, fall back to one-by-one to skip bad chunks. */
+async function callEmbedding(texts: string[], deviceId: string): Promise<(number[] | null)[]> {
+  const safeTexts = texts.map((t) => t.length > MAX_CHUNK_CHARS ? t.slice(0, MAX_CHUNK_CHARS) : t);
+
+  try {
+    return await callEmbeddingBatch(safeTexts, deviceId);
+  } catch (batchError) {
+    console.warn(`[KBIndexer] batch embedding failed, retrying individually: ${batchError instanceof Error ? batchError.message : batchError}`);
+    const results: (number[] | null)[] = [];
+    for (let i = 0; i < safeTexts.length; i++) {
+      try {
+        const [vec] = await callEmbeddingBatch([safeTexts[i]], deviceId);
+        results.push(vec);
+      } catch (singleError) {
+        console.warn(`[KBIndexer] skipping chunk ${i} (${safeTexts[i].length} chars): ${singleError instanceof Error ? singleError.message : singleError}`);
+        results.push(null);
+      }
+    }
+    return results;
+  }
+}
+
 // ── Excel parser ─────────────────────────────────────────────────────────────
 
 function parseExcelToChunks(filePath: string): string[] {
-  const workbook = XLSX.readFile(filePath, { cellDates: true });
+  const workbook = XLSX.read(fs.readFileSync(filePath), { cellDates: true });
   const allChunks: string[] = [];
 
   for (const sheetName of workbook.SheetNames) {
@@ -226,17 +240,23 @@ export class KBIndexer extends EventEmitter {
     }
   }
 
+  /** Cancel all pending queue items for a folder (call before removing folder). */
+  cancelFolder(folderId: number): void {
+    this.queue = this.queue.filter((q) => q.folderId !== folderId);
+  }
+
   private async processQueue(): Promise<void> {
     this.isRunning = true;
     const errors: string[] = [];
     let done = 0;
-    const total = this.queue.length;
 
     while (this.queue.length > 0) {
       const item = this.queue.shift()!;
+      // Total is always recalculated: completed + current + remaining
+      const total = done + 1 + this.queue.length;
 
       this.emit('progress', {
-        total: total,
+        total,
         done,
         current_file: item.filePath,
         errors,
@@ -254,7 +274,7 @@ export class KBIndexer extends EventEmitter {
     }
 
     this.emit('progress', {
-      total,
+      total: done,
       done,
       current_file: '',
       errors,
@@ -264,14 +284,14 @@ export class KBIndexer extends EventEmitter {
   }
 
   private async indexFile(filePath: string, folderId: number, errors: string[]): Promise<void> {
-    const mineruApiKey = this.store.get<string>('kb:mineru_key') ?? '';
-    const zhipuApiKey = this.store.get<string>('kb:zhipu_key') ?? '';
+    const appConfig = this.store.get<{ cloud?: { deviceId?: string } }>('app_config');
+    const deviceId = appConfig?.cloud?.deviceId?.trim() ?? '';
 
-    if (!zhipuApiKey) {
-      const msg = `[KB] skipping ${path.basename(filePath)}: Zhipu API key not configured`;
+    if (!deviceId) {
+      const msg = `[KB] skipping ${path.basename(filePath)}: cloud service not registered`;
       console.warn(msg);
       errors.push(msg);
-      this.store.upsertKBDoc({ folder_id: folderId, file_path: filePath, status: 'error', error_msg: 'Zhipu API key not configured' });
+      this.store.upsertKBDoc({ folder_id: folderId, file_path: filePath, status: 'error', error_msg: 'Cloud service not registered' });
       return;
     }
 
@@ -292,27 +312,31 @@ export class KBIndexer extends EventEmitter {
     this.store.upsertKBDoc({ folder_id: folderId, file_path: filePath, file_hash: hash, status: 'indexing' });
 
     try {
-      const chunks = await this.extractChunks(filePath, mineruApiKey);
+      const rawChunks = await this.extractChunks(filePath, deviceId);
+      const chunks = rawChunks.filter((c) => c.trim().length > 0);
       if (!chunks.length) {
         this.store.upsertKBDoc({ folder_id: folderId, file_path: filePath, file_hash: hash, status: 'done', chunk_count: 0 });
         return;
       }
 
-      const allVectors: number[][] = [];
+      const allVectors: (number[] | null)[] = [];
       for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
         const batch = chunks.slice(i, i + EMBED_BATCH_SIZE);
-        const vectors = await callZhipuEmbedding(batch, zhipuApiKey);
+        const vectors = await callEmbedding(batch, deviceId);
         allVectors.push(...vectors);
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
 
-      const records: KBChunkRecord[] = chunks.map((text, idx) => ({
-        id: `${filePath}::${idx}`,
-        file_path: filePath,
-        chunk_index: idx,
-        text,
-        vector: allVectors[idx],
-      }));
+      const records: KBChunkRecord[] = chunks
+        .map((text, idx) => ({ text, idx, vector: allVectors[idx] }))
+        .filter((item): item is { text: string; idx: number; vector: number[] } => item.vector !== null)
+        .map(({ text, idx, vector }) => ({
+          id: `${filePath}::${idx}`,
+          file_path: filePath,
+          chunk_index: idx,
+          text,
+          vector,
+        }));
 
       await this.kbStore.upsertChunks(records);
       this.store.upsertKBDoc({ folder_id: folderId, file_path: filePath, file_hash: hash, status: 'done', chunk_count: chunks.length });
@@ -325,10 +349,10 @@ export class KBIndexer extends EventEmitter {
     }
   }
 
-  private async extractChunks(filePath: string, mineruApiKey: string): Promise<string[]> {
+  private async extractChunks(filePath: string, deviceId: string): Promise<string[]> {
     const ext = path.extname(filePath).toLowerCase();
 
-    if (ext === '.xlsx') {
+    if (ext === '.xlsx' || ext === '.xls') {
       return parseExcelToChunks(filePath);
     }
 
@@ -337,10 +361,29 @@ export class KBIndexer extends EventEmitter {
       return chunkMarkdown(text);
     }
 
-    // PDF, DOCX, PPTX, images → MinerU
-    if (!mineruApiKey) throw new Error('MinerU API key not configured');
-    const markdown = await callMinerUAPI(filePath, mineruApiKey);
-    return chunkMarkdown(markdown);
+    if (ext === '.pptx') {
+      const text = await parsePptx(filePath);
+      return chunkMarkdown(text);
+    }
+
+    if (ext === '.docx') {
+      const text = await parseDocx(filePath);
+      return chunkMarkdown(text);
+    }
+
+    if (ext === '.pdf') {
+      const text = await parsePdf(filePath);
+      return chunkMarkdown(text);
+    }
+
+    if (IMAGE_EXTENSIONS.has(ext)) {
+      const description = await describeImageWithZhipu(filePath, deviceId);
+      if (!description.trim()) return [];
+      const fileName = path.basename(filePath);
+      return [`[图片：${fileName}]\n${description}`];
+    }
+
+    return [];
   }
 
   get queueLength(): number {
@@ -352,4 +395,4 @@ export class KBIndexer extends EventEmitter {
   }
 }
 
-export const callZhipuEmbeddingPublic = callZhipuEmbedding;
+export const callEmbeddingPublic = callEmbeddingBatch;

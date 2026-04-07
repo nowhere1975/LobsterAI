@@ -24,8 +24,15 @@ export interface KBIndexProgress {
 export interface KBConfig {
   trigger_words: string;
   top_k: string;
-  mineru_key: string;
-  zhipu_key: string;
+}
+
+export interface KBDoc {
+  id: number;
+  file_path: string;
+  file_hash: string | null;
+  status: string;
+  error_msg: string | null;
+  chunk_count: number | null;
 }
 
 export const kbService = {
@@ -63,6 +70,18 @@ export const kbService = {
 
   async setConfig(config: Partial<KBConfig>): Promise<void> {
     return window.electron.kb.setConfig(config as Record<string, string>);
+  },
+
+  async listDocs(folderId: number): Promise<KBDoc[]> {
+    return window.electron.kb.listDocs(folderId);
+  },
+
+  async getScope(): Promise<string> {
+    return window.electron.kb.getScope();
+  },
+
+  async generateScope(): Promise<string> {
+    return window.electron.kb.generateScope();
   },
 
   onIndexProgress(callback: (progress: KBIndexProgress) => void): () => void {

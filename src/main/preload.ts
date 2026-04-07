@@ -341,6 +341,9 @@ contextBridge.exposeInMainWorld('electron', {
     selectFolder: () => ipcRenderer.invoke('kb:selectFolder'),
     getConfig: () => ipcRenderer.invoke('kb:getConfig'),
     setConfig: (config: Record<string, string>) => ipcRenderer.invoke('kb:setConfig', config),
+    listDocs: (folderId: number) => ipcRenderer.invoke('kb:listDocs', folderId),
+    getScope: () => ipcRenderer.invoke('kb:getScope'),
+    generateScope: () => ipcRenderer.invoke('kb:generateScope'),
     onIndexProgress: (callback: (progress: {
       total: number;
       done: number;

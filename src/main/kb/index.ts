@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import type { BrowserWindow } from 'electron';
 import type { SqliteStore } from '../sqliteStore';
 import { KBStore } from './store';
-import { KBIndexer, containsTriggerWord, callZhipuEmbeddingPublic } from './indexer';
+import { KBIndexer, containsTriggerWord, callEmbeddingPublic } from './indexer';
 import { KBWatcher } from './watcher';
 import type { KBFolder, KBSearchResult, KBStats, KBIndexProgress } from './types';
 
@@ -54,6 +54,13 @@ export class KBManager extends EventEmitter {
 
   removeFolder(folderId: number): void {
     void this.watcher.unwatch(folderId);
+    // Cancel any queued-but-not-yet-started items for this folder
+    this.indexer.cancelFolder(folderId);
+    // Enqueue LanceDB chunk deletion for docs already indexed
+    const docs = this.store.listKBDocsByFolder(folderId);
+    for (const doc of docs) {
+      this.indexer.enqueue(doc.file_path, folderId, 'delete');
+    }
     this.store.removeKBFolder(folderId);
     console.log(`[KBManager] removed folder id=${folderId}`);
   }
@@ -106,15 +113,55 @@ export class KBManager extends EventEmitter {
   // ── Search ─────────────────────────────────────────────────────────────────
 
   async search(query: string, topK?: number): Promise<KBSearchResult[]> {
-    const zhipuApiKey = this.store.get<string>('kb:zhipu_key') ?? '';
-    if (!zhipuApiKey) return [];
+    const appConfig = this.store.get<{ cloud?: { deviceId?: string } }>('app_config');
+    const deviceId = appConfig?.cloud?.deviceId?.trim() ?? '';
+    if (!deviceId) return [];
 
     const isEmpty = await this.kbStore.isEmpty();
     if (isEmpty) return [];
 
     const k = topK ?? Number(this.store.get<string>('kb:top_k') ?? '5');
-    const [queryVector] = await callZhipuEmbeddingPublic([query], zhipuApiKey);
+    const [queryVector] = await callEmbeddingPublic([query], deviceId);
     return this.kbStore.search(queryVector, k);
+  }
+
+  // ── Scope summary ──────────────────────────────────────────────────────────
+
+  getScope(): string {
+    return this.store.get<string>('kb:scope') ?? '';
+  }
+
+  async generateScope(): Promise<string> {
+    const appConfig = this.store.get<{ cloud?: { deviceId?: string } }>('app_config');
+    const deviceId = appConfig?.cloud?.deviceId?.trim() ?? '';
+    if (!deviceId) return '';
+
+    const samples = await this.kbStore.sampleChunks(20);
+    if (samples.length === 0) return '';
+
+    const context = samples.map((t, i) => `[片段${i + 1}] ${t}`).join('\n\n');
+    const prompt = `以下是知识库中随机抽取的文档片段，请根据这些内容，用一到两句话概括这个知识库涵盖的主题和领域。只输出概括内容，不要有前缀或解释。\n\n${context}`;
+
+    try {
+      const fetch = (await import('electron')).net.fetch;
+      const resp = await fetch('http://1.14.96.63:3000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          stream: false,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!resp.ok) return '';
+      const json = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const scope = json.choices?.[0]?.message?.content?.trim() ?? '';
+      if (scope) this.store.set('kb:scope', scope);
+      return scope;
+    } catch (err) {
+      console.error('[KBManager] scope generation failed:', err);
+      return '';
+    }
   }
 
   // ── Trigger word detection ──────────────────────────────────────────────────
