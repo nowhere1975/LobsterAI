@@ -58,15 +58,21 @@ function fileHash(filePath: string): string {
 
 // ── API clients ──────────────────────────────────────────────────────────────
 
+const MINERU_BASE = 'https://mineru.net';
+const MINERU_POLL_INTERVAL = 4000;   // 4s between polls
+const MINERU_POLL_TIMEOUT = 300000;  // 5 min max
+
 async function callMinerUAPI(filePath: string, mineruApiKey: string): Promise<string> {
   const FormData = (await import('form-data')).default;
   const fetch = (await import('electron')).net.fetch;
+  const extractZip = (await import('extract-zip')).default;
+  const os = await import('os');
 
+  // Step 1: Submit task
   const form = new FormData();
-  form.append('file', fs.readFileSync(filePath), path.basename(filePath));
-  form.append('output_format', 'markdown');
+  form.append('file', fs.readFileSync(filePath), { filename: path.basename(filePath) });
 
-  const response = await fetch('https://mineru.net/api/v4/extract/upload', {
+  const submitResp = await fetch(`${MINERU_BASE}/api/v4/extract/task`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${mineruApiKey}`,
@@ -75,14 +81,85 @@ async function callMinerUAPI(filePath: string, mineruApiKey: string): Promise<st
     body: form.getBuffer() as unknown as BodyInit,
   });
 
-  if (!response.ok) {
-    throw new Error(`MinerU API error ${response.status}: ${await response.text()}`);
+  if (!submitResp.ok) {
+    throw new Error(`MinerU submit error ${submitResp.status}: ${await submitResp.text()}`);
   }
 
-  const json = await response.json() as { data?: { markdown?: string } };
-  const markdown = json?.data?.markdown;
-  if (!markdown) throw new Error('MinerU returned empty markdown');
-  return markdown;
+  const submitJson = await submitResp.json() as { code: number; data?: { task_id?: string } };
+  const taskId = submitJson.data?.task_id;
+  if (!taskId) throw new Error(`MinerU: no task_id in response: ${JSON.stringify(submitJson)}`);
+
+  console.log(`[KBIndexer] MinerU task submitted: ${taskId} for ${path.basename(filePath)}`);
+
+  // Step 2: Poll for completion
+  const deadline = Date.now() + MINERU_POLL_TIMEOUT;
+  while (Date.now() < deadline) {
+    await new Promise<void>((r) => setTimeout(r, MINERU_POLL_INTERVAL));
+
+    const pollResp = await fetch(`${MINERU_BASE}/api/v4/extract/task/${taskId}`, {
+      headers: { Authorization: `Bearer ${mineruApiKey}` },
+    });
+
+    if (!pollResp.ok) {
+      console.warn(`[KBIndexer] MinerU poll error ${pollResp.status}, retrying…`);
+      continue;
+    }
+
+    const pollJson = await pollResp.json() as {
+      code: number;
+      data?: { state?: string; result?: { download_url?: string } };
+    };
+
+    const state = pollJson.data?.state;
+    console.debug(`[KBIndexer] MinerU task ${taskId} state: ${state}`);
+
+    if (state === 'failed') throw new Error('MinerU: task processing failed');
+    if (state === 'done') {
+      const downloadUrl = pollJson.data?.result?.download_url;
+      if (!downloadUrl) throw new Error(`MinerU: done but no download_url: ${JSON.stringify(pollJson)}`);
+      return await mineruDownloadMarkdown(downloadUrl, taskId, fetch, extractZip, os);
+    }
+    // states: pending / processing / done / failed — keep polling
+  }
+
+  throw new Error('MinerU: task timed out after 5 minutes');
+}
+
+async function mineruDownloadMarkdown(
+  downloadUrl: string,
+  taskId: string,
+  fetch: typeof globalThis.fetch,
+  extractZip: (zipPath: string, opts: { dir: string }) => Promise<void>,
+  os: typeof import('os'),
+): Promise<string> {
+  const zipResp = await (fetch as (url: string) => Promise<Response>)(downloadUrl);
+  if (!zipResp.ok) throw new Error(`MinerU: download failed ${zipResp.status}`);
+
+  const zipBuffer = Buffer.from(await zipResp.arrayBuffer());
+  const tmpDir = path.join(os.tmpdir(), `mineru-${taskId}`);
+  const tmpZip = `${tmpDir}.zip`;
+
+  fs.writeFileSync(tmpZip, zipBuffer);
+  fs.mkdirSync(tmpDir, { recursive: true });
+
+  try {
+    await extractZip(tmpZip, { dir: tmpDir });
+
+    // Find the first .md file in the extracted content
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir).flatMap((f) => {
+        const full = path.join(dir, f);
+        return fs.statSync(full).isDirectory() ? walk(full) : [full];
+      });
+
+    const mdFile = walk(tmpDir).find((f) => f.endsWith('.md'));
+    if (!mdFile) throw new Error('MinerU: no .md file found in result zip');
+
+    return fs.readFileSync(mdFile, 'utf-8');
+  } finally {
+    try { fs.rmSync(tmpZip); } catch { /* ignore */ }
+    try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+  }
 }
 
 async function callZhipuEmbedding(texts: string[], zhipuApiKey: string): Promise<number[][]> {
